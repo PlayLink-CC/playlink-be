@@ -74,3 +74,48 @@ export const findMostBookedVenuesThisWeek = async () => {
   const [rows] = await connectDB.execute(sql);
   return rows;
 };
+
+// Search venues by name, location, or sports
+export const findVenuesBySearch = async (searchText) => {
+  const sql = `
+    SELECT 
+        v.venue_id,
+        v.name AS venue_name,
+        CONCAT_WS(', ', v.address, v.city) AS location,
+        GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
+        v.price_per_hour,
+        vi.image_url AS primary_image,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities
+    FROM venues v
+    LEFT JOIN venue_sports vs 
+        ON vs.venue_id = v.venue_id
+    LEFT JOIN sports s 
+        ON s.sport_id = vs.sport_id
+    LEFT JOIN venue_images vi 
+        ON vi.venue_id = v.venue_id
+       AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va 
+        ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a 
+        ON a.amenity_id = va.amenity_id
+    WHERE v.name LIKE ? 
+       OR v.address LIKE ? 
+       OR v.city LIKE ? 
+       OR s.name LIKE ?
+    GROUP BY 
+        v.venue_id,
+        v.name,
+        location,
+        v.price_per_hour,
+        vi.image_url
+  `;
+
+  const searchPattern = `%${searchText}%`;
+  const [rows] = await connectDB.execute(sql, [
+    searchPattern,
+    searchPattern,
+    searchPattern,
+    searchPattern,
+  ]);
+  return rows;
+};
