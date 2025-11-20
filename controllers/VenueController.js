@@ -1,12 +1,23 @@
 import {
   getAllVenues,
   findMostBookedVenuesThisWeek,
+  searchVenues,
 } from "../services/VenueService.js";
 
 // GET /api/venues
 export const fetchAllVenues = async (req, res) => {
   try {
-    const venues = await getAllVenues();
+    const { search } = req.query;
+
+    let venues;
+    if (search && search.trim()) {
+      // If search query parameter exists, perform search
+      venues = await searchVenues(search.trim());
+    } else {
+      // Otherwise fetch all venues
+      venues = await getAllVenues();
+    }
+
     res.json(venues);
   } catch (err) {
     console.error("Error fetching venues:", err);

@@ -6,7 +6,7 @@ import {
 
 const router = express.Router();
 
-// GET /api/venues
+// GET /api/venues - for fetching all venues & search
 router.get("/", fetchAllVenues);
 
 // GET /api/venues/top-weekly
