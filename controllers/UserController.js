@@ -1,8 +1,32 @@
-// controllers/UserController.js
+/**
+ * User Controller
+ *
+ * Handles all user-related HTTP requests including authentication,
+ * session validation, and user profile retrieval.
+ *
+ * Responsibilities:
+ * - Request validation
+ * - Token generation and verification
+ * - HTTP response formatting
+ * - Error handling
+ *
+ * @module controllers/UserController
+ */
+
 import { getUsers, logInUser } from "../services/UserService.js";
 import { createToken, verifyToken } from "../utils/authUtil.js";
 
-// GET /api/users
+/**
+ * Retrieve all users from the database
+ *
+ * @async
+ * @route GET /api/users
+ * @access Protected - Requires valid JWT token
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Object[]} Array of user objects
+ * @returns {number} res.status - 200 on success, 500 on error
+ */
 export const getAllUsers = async (req, res) => {
   try {
     const users = await getUsers();
@@ -13,7 +37,25 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-// POST /api/users/login
+/**
+ * Authenticate user and create session token
+ *
+ * Validates email and password, compares password hash, and creates
+ * a signed JWT token stored in an httpOnly cookie.
+ *
+ * @async
+ * @route POST /api/users/login
+ * @access Public
+ * @param {Object} req - Express request object
+ * @param {Object} req.body - Request body
+ * @param {string} req.body.email - User email address
+ * @param {string} req.body.password - Plain text password
+ * @param {Object} res - Express response object
+ * @returns {Object} User object (excluding password)
+ * @returns {number} res.status - 200 on success, 400/401/500 on error
+ * @throws {Error} 400 - Missing email or password
+ * @throws {Error} 401 - Invalid credentials
+ */
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -52,8 +94,22 @@ export const login = async (req, res) => {
   }
 };
 
-// GET /api/users/authenticate
-// Quick endpoint to check current session from cookie
+/**
+ * Validate current session without middleware
+ *
+ * Checks if a valid authToken cookie exists and verifies the JWT.
+ * Used to determine if user is still logged in.
+ *
+ * @async
+ * @route GET /api/users/authenticate
+ * @access Public
+ * @param {Object} req - Express request object
+ * @param {Object} req.signedCookies - Signed cookies from request
+ * @param {Object} res - Express response object
+ * @returns {Object} User payload from token
+ * @returns {number} res.status - 200 on success, 403 on error
+ * @throws {Error} 403 - Session expired or invalid token
+ */
 export const authenticateUser = async (req, res) => {
   try {
     const token = req.signedCookies.authToken;

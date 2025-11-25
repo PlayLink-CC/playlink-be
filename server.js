@@ -1,3 +1,12 @@
+/**
+ * PlayLink Backend API Server
+ *
+ * Main entry point for the Express application. Initializes middleware,
+ * sets up CORS configuration, and mounts all routes under /api prefix.
+ *
+ * @module server
+ */
+
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";

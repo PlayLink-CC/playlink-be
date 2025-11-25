@@ -1,6 +1,42 @@
+/**
+ * Venue Repository
+ *
+ * Data access layer for venue-related database operations.
+ * Handles complex queries for venue data with related information
+ * like sports, amenities, and images.
+ *
+ * Uses parameterized queries to prevent SQL injection.
+ * Utilizes GROUP_CONCAT for efficient data aggregation.
+ *
+ * Responsibilities:
+ * - Complex venue queries with JOINs
+ * - Search functionality
+ * - Trending venues calculation
+ *
+ * @module repositories/VenueRepository
+ */
+
 import connectDB from "../config/dbconnection.js";
 
-// Fetch all venues
+/**
+ * Fetch all venues with complete details
+ *
+ * Retrieves all venues with aggregated information:
+ * - Associated sports (court types)
+ * - Primary venue image
+ * - Available amenities
+ *
+ * @async
+ * @returns {Promise<Object[]>} Array of venue objects
+ * @returns {number} rows[].venue_id - Venue ID
+ * @returns {string} rows[].venue_name - Venue name
+ * @returns {string} rows[].location - Address and city
+ * @returns {string} rows[].court_types - Comma-separated sports
+ * @returns {number} rows[].price_per_hour - Hourly rate
+ * @returns {string} rows[].primary_image - URL of main image
+ * @returns {string} rows[].amenities - Comma-separated amenity list
+ * @throws {Error} Database connection error
+ */
 export const findAllVenues = async () => {
   const sql = `
     SELECT 
@@ -35,7 +71,25 @@ export const findAllVenues = async () => {
   return rows;
 };
 
-// Fetch top 4 most booked venues in the last week
+/**
+ * Fetch top 4 most booked venues from the past 7 days
+ *
+ * Retrieves only active venues with booking counts from the
+ * last 7 days, ordered by popularity (most booked first).
+ *
+ * Considers only confirmed and completed bookings.
+ *
+ * @async
+ * @returns {Promise<Object[]>} Array of top 4 venues
+ * @returns {number} rows[].venue_id - Venue ID
+ * @returns {string} rows[].venue_name - Venue name
+ * @returns {string} rows[].location - Address and city
+ * @returns {number} rows[].price_per_hour - Hourly rate
+ * @returns {string} rows[].primary_image - URL of main image
+ * @returns {string} rows[].amenities - Comma-separated amenity list
+ * @returns {number} rows[].bookings_this_week - Number of bookings
+ * @throws {Error} Database connection error
+ */
 export const findMostBookedVenuesThisWeek = async () => {
   const sql = `
     SELECT 
@@ -75,7 +129,28 @@ export const findMostBookedVenuesThisWeek = async () => {
   return rows;
 };
 
-// Search venues by name, location, or sports
+/**
+ * Search venues by multiple criteria
+ *
+ * Performs LIKE search across venue name, address, city,
+ * and associated sports. Returns matching venues with all
+ * related information.
+ *
+ * Uses parameterized queries to prevent SQL injection.
+ * Case-insensitive search using LIKE operator.
+ *
+ * @async
+ * @param {string} searchText - Search query string
+ * @returns {Promise<Object[]>} Array of matching venue objects
+ * @returns {number} rows[].venue_id - Venue ID
+ * @returns {string} rows[].venue_name - Venue name
+ * @returns {string} rows[].location - Address and city
+ * @returns {string} rows[].court_types - Comma-separated sports
+ * @returns {number} rows[].price_per_hour - Hourly rate
+ * @returns {string} rows[].primary_image - URL of main image
+ * @returns {string} rows[].amenities - Comma-separated amenity list
+ * @throws {Error} Database connection error
+ */
 export const findVenuesBySearch = async (searchText) => {
   const sql = `
     SELECT 
