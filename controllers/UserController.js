@@ -128,3 +128,14 @@ export const authenticateUser = async (req, res) => {
     res.status(403).json({ error: "Token is invalid or expired" });
   }
 };
+
+export const logout = (req, res) => {
+  res.clearCookie("authToken", {
+    httpOnly: true,
+    secure: false,
+    sameSite: "None",
+    signed: true,
+  });
+
+  res.json({ message: "Logged out" });
+};
