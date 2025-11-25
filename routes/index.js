@@ -14,11 +14,13 @@
 import express from "express";
 import userRoutes from "./User.js";
 import venueRoutes from "./Venue.js";
+import bookingRoutes from "./Booking.js";
 
 const router = express.Router();
 
 // All user-related routes will be under /api/users/...
 router.use("/users", userRoutes);
 router.use("/venues", venueRoutes);
+router.use("/bookings", bookingRoutes);
 
 export default router;
