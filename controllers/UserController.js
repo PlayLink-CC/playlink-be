@@ -56,6 +56,7 @@ export const getAllUsers = async (req, res) => {
  * @throws {Error} 400 - Missing email or password
  * @throws {Error} 401 - Invalid credentials
  */
+// controllers/UserController.js
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -68,31 +69,27 @@ export const login = async (req, res) => {
 
     const user = await logInUser(email, password);
 
-    const token = createToken({
-      id: user.id,
-      email: user.email,
-      accountType: user.accountType,
-    });
+    const token = createToken(user);
 
     res.cookie("authToken", token, {
       httpOnly: true,
-      secure: false, // for localhost
-      maxAge: 1000 * 60 * 60, // 1 hour
+      secure: false,
+      maxAge: 1000 * 60 * 60,
       signed: true,
-      sameSite: "None",
+      sameSite: "Lax",
+      path: "/",
     });
 
     res.json(user);
   } catch (err) {
     console.error(err);
-
     if (err.message === "Invalid credentials") {
       return res.status(401).json({ message: "Invalid email or password" });
     }
-
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 /**
  * Validate current session without middleware
@@ -129,13 +126,18 @@ export const authenticateUser = async (req, res) => {
   }
 };
 
+// controllers/UserController.js
+
 export const logout = (req, res) => {
   res.clearCookie("authToken", {
     httpOnly: true,
     secure: false,
-    sameSite: "None",
+    sameSite: "Lax",
     signed: true,
+    path: "/",
   });
 
-  res.json({ message: "Logged out" });
+  console.log(res);
+
+  return res.json({ message: "Logged out" });
 };
