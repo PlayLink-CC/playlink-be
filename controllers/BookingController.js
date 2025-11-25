@@ -213,3 +213,39 @@ export const handleCheckoutSuccess = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+// controllers/BookingController.js
+
+export const getMyBookings = async (req, res) => {
+  const userId = req.user.id; // from auth middleware
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT
+         b.booking_id,
+         b.booking_start,
+         b.booking_end,
+         b.total_amount,
+         b.status,
+         v.name   AS venue_name,
+         v.city   AS venue_city,
+         v.address AS venue_address,
+         bp.share_amount,
+         bp.payment_status,
+         bp.is_initiator
+       FROM booking_participants bp
+       JOIN bookings b ON b.booking_id = bp.booking_id
+       JOIN venues   v ON v.venue_id  = b.venue_id
+       WHERE bp.user_id = ?
+       ORDER BY b.booking_start DESC`,
+      [userId]
+    );
+
+    return res.json({ bookings: rows });
+  } catch (err) {
+    console.error("Error fetching user bookings:", err);
+    return res
+      .status(500)
+      .json({ message: "Server error while fetching bookings" });
+  }
+};
