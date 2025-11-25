@@ -1,19 +1,6 @@
-import pool from "../config/dbconnection.js";
 import stripe from "../config/stripe.js";
-
-/**
- * Helper: format Date -> "YYYY-MM-DD HH:MM:SS" for MySQL
- */
-const toMySQLDateTime = (dateObj) => {
-  const pad = (n) => String(n).padStart(2, "0");
-  const yyyy = dateObj.getFullYear();
-  const mm = pad(dateObj.getMonth() + 1);
-  const dd = pad(dateObj.getDate());
-  const hh = pad(dateObj.getHours());
-  const mi = pad(dateObj.getMinutes());
-  const ss = pad(dateObj.getSeconds());
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
-};
+import { toMySQLDateTime } from "../utils/dateUtil.js";
+import * as BookingRepository from "../repositories/BookingRepository.js";
 
 /**
  * POST /api/bookings/checkout-session
@@ -31,59 +18,48 @@ export const createCheckoutSession = async (req, res) => {
   }
 
   try {
+    // 1) Get venue price & cancellation policy
+    const venue = await BookingRepository.getVenueById(venueId);
+
+    if (!venue) {
+      return res.status(404).json({ message: "Venue not found" });
+    }
+
+    // 2) Compute start/end times
+    const start = new Date(`${date}T${time}:00`);
+    const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
+
+    const bookingStart = toMySQLDateTime(start);
+    const bookingEnd = toMySQLDateTime(end);
+
+    // 3) Compute total amount (LKR)
+    const pricePerHour = Number(venue.price_per_hour);
+    const totalAmount = pricePerHour * Number(hours); // e.g. 2500 * 2
+    const amountInMinor = Math.round(totalAmount * 100); // Stripe wants cents
+
+    const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
+
     try {
-      // 1) Get venue price & cancellation policy
-      const [venueRows] = await conn.execute(
-        "SELECT venue_id, name, price_per_hour, cancellation_policy_id FROM venues WHERE venue_id = ?",
-        [venueId]
-      );
-
-      if (venueRows.length === 0) {
-        conn.release();
-        return res.status(404).json({ message: "Venue not found" });
-      }
-
-      const venue = venueRows[0];
-
-      // 2) Compute start/end times
-      const start = new Date(`${date}T${time}:00`);
-      const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
-
-      const bookingStart = toMySQLDateTime(start);
-      const bookingEnd = toMySQLDateTime(end);
-
-      // 3) Compute total amount (LKR)
-      const pricePerHour = Number(venue.price_per_hour);
-      const totalAmount = pricePerHour * Number(hours); // e.g. 2500 * 2
-      const amountInMinor = Math.round(totalAmount * 100); // Stripe wants cents
-
       await conn.beginTransaction();
 
       // 4) Create booking (status = PENDING)
-      const [bookingResult] = await conn.execute(
-        `INSERT INTO bookings
-         (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
-         VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-        [
-          venue.venue_id,
-          userId,
-          bookingStart,
-          bookingEnd,
-          totalAmount,
-          venue.cancellation_policy_id,
-        ]
-      );
-
-      const bookingId = bookingResult.insertId;
+      const bookingId = await BookingRepository.createBooking(conn, {
+        venueId: venue.venue_id,
+        userId,
+        bookingStart,
+        bookingEnd,
+        totalAmount,
+        cancellationPolicyId: venue.cancellation_policy_id,
+      });
 
       // 5) Add initiator as participant
-      await conn.execute(
-        `INSERT INTO booking_participants
-         (booking_id, user_id, share_amount, is_initiator, invite_status, payment_status)
-         VALUES (?, ?, ?, 1, 'ACCEPTED', 'PENDING')`,
-        [bookingId, userId, totalAmount]
-      );
+      await BookingRepository.addBookingParticipant(conn, {
+        bookingId,
+        userId,
+        shareAmount: totalAmount,
+        isInitiator: 1,
+      });
 
       // 6) Create Stripe Checkout Session
       const session = await stripe.checkout.sessions.create({
@@ -112,19 +88,21 @@ export const createCheckoutSession = async (req, res) => {
       });
 
       // 7) Record payment entry (PENDING)
-      await conn.execute(
-        `INSERT INTO payments
-         (booking_id, payer_id, amount, currency, payment_source, status, provider_reference)
-         VALUES (?, ?, ?, ?, 'CARD', 'PENDING', ?)`,
-        [bookingId, userId, totalAmount, "LKR", session.id]
-      );
+      await BookingRepository.createPayment(conn, {
+        bookingId,
+        payerId: userId,
+        amount: totalAmount,
+        currency: "LKR",
+        providerReference: session.id,
+      });
 
       await conn.commit();
       conn.release();
 
       return res.json({ checkoutUrl: session.url });
     } catch (err) {
-      await pool.query("ROLLBACK");
+      await conn.rollback();
+      conn.release();
       throw err;
     }
   } catch (err) {
@@ -160,52 +138,35 @@ export const handleCheckoutSuccess = async (req, res) => {
       return res.status(400).json({ message: "Missing booking_id in metadata" });
     }
 
+    const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
 
     try {
       await conn.beginTransaction();
 
       // 2) Update payment & booking statuses
-      await conn.execute(
-        "UPDATE payments SET status = 'SUCCEEDED' WHERE provider_reference = ?",
-        [session.id]
-      );
+      await BookingRepository.updatePaymentStatus(conn, session.id, "SUCCEEDED");
 
-      await conn.execute(
-        "UPDATE bookings SET status = 'CONFIRMED' WHERE booking_id = ?",
-        [bookingId]
-      );
+      await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
 
-      await conn.execute(
-        "UPDATE booking_participants SET payment_status = 'PAID' WHERE booking_id = ?",
-        [bookingId]
-      );
+      await BookingRepository.updateParticipantsPaymentStatus(conn, bookingId, "PAID");
 
       // 3) Return booking summary with venue info
-      const [rows] = await conn.execute(
-        `SELECT
-          b.*,
-          v.name AS venue_name,
-          v.address,
-          v.city
-         FROM bookings b
-         JOIN venues v ON b.venue_id = v.venue_id
-         WHERE b.booking_id = ?`,
-        [bookingId]
-      );
+      const booking = await BookingRepository.getBookingWithVenue(conn, bookingId);
 
       await conn.commit();
       conn.release();
 
-      if (!rows.length) {
+      if (!booking) {
         return res
           .status(404)
           .json({ message: "Booking not found after payment" });
       }
 
-      return res.json({ booking: rows[0] });
+      return res.json({ booking });
     } catch (err) {
-      await pool.query("ROLLBACK");
+      await conn.rollback();
+      conn.release();
       throw err;
     }
   } catch (err) {
@@ -214,34 +175,17 @@ export const handleCheckoutSuccess = async (req, res) => {
   }
 };
 
-// controllers/BookingController.js
-
+/**
+ * GET /api/bookings/my-bookings
+ *
+ * Fetch all bookings for the authenticated user
+ */
 export const getMyBookings = async (req, res) => {
   const userId = req.user.id; // from auth middleware
 
   try {
-    const [rows] = await pool.execute(
-      `SELECT
-         b.booking_id,
-         b.booking_start,
-         b.booking_end,
-         b.total_amount,
-         b.status,
-         v.name   AS venue_name,
-         v.city   AS venue_city,
-         v.address AS venue_address,
-         bp.share_amount,
-         bp.payment_status,
-         bp.is_initiator
-       FROM booking_participants bp
-       JOIN bookings b ON b.booking_id = bp.booking_id
-       JOIN venues   v ON v.venue_id  = b.venue_id
-       WHERE bp.user_id = ?
-       ORDER BY b.booking_start DESC`,
-      [userId]
-    );
-
-    return res.json({ bookings: rows });
+    const bookings = await BookingRepository.getUserBookings(userId);
+    return res.json({ bookings });
   } catch (err) {
     console.error("Error fetching user bookings:", err);
     return res
