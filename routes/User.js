@@ -20,6 +20,7 @@ import {
   getAllUsers,
   login,
   authenticateUser,
+  logout,
 } from "../controllers/UserController.js";
 import { authenticate as authMiddleware } from "../middleware/auth.js";
 
@@ -30,6 +31,12 @@ const router = express.Router();
  * Public endpoint for user authentication
  */
 router.post("/login", login);
+
+/**
+ * POST /users/logout
+ * Public endpoint to clear auth cookie and end session
+ */
+router.post("/logout", logout);
 
 /**
  * GET /users/authenticate
