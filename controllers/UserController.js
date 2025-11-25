@@ -76,7 +76,7 @@ export const login = async (req, res) => {
       secure: false,
       maxAge: 1000 * 60 * 60,
       signed: true,
-      sameSite: "None",
+      sameSite: "Lax",
       path: "/",
     });
 
@@ -132,10 +132,12 @@ export const logout = (req, res) => {
   res.clearCookie("authToken", {
     httpOnly: true,
     secure: false,
-    sameSite: "None",
+    sameSite: "Lax",
     signed: true,
     path: "/",
   });
+
+  console.log(res);
 
   return res.json({ message: "Logged out" });
 };
