@@ -13,7 +13,7 @@
  * @module controllers/UserController
  */
 
-import { getUsers, logInUser } from "../services/UserService.js";
+import { getUsers, logInUser, registerUser } from "../services/UserService.js";
 import { createToken, verifyToken } from "../utils/authUtil.js";
 
 /**
@@ -33,6 +33,73 @@ export const getAllUsers = async (req, res) => {
     res.json(users);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Register a new user
+ *
+ * Validates input, creates a new user, and issues an auth token
+ * in an httpOnly cookie so the user is logged in immediately.
+ *
+ * @async
+ * @route POST /api/users/register
+ * @access Public
+ * @param {Object} req - Express request object
+ * @param {Object} req.body
+ * @param {string} req.body.fullName - User full name
+ * @param {string} req.body.email - User email address
+ * @param {string} req.body.password - Plain text password
+ * @param {string} [req.body.phone] - Optional phone number
+ * @param {string} [req.body.accountType] - Optional account type
+ * @param {Object} res - Express response object
+ * @returns {Object} Newly created user object (excluding password)
+ * @returns {number} res.status - 201 on success, 400/409/500 on error
+ */
+export const register = async (req, res) => {
+  try {
+    const { fullName, email, password, phone, accountType } = req.body;
+
+    if (!fullName || !email || !password) {
+      return res
+        .status(400)
+        .json({ message: "Full name, email and password are required" });
+    }
+
+    if (password.length < 8) {
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 8 characters long" });
+    }
+
+    const user = await registerUser({
+      fullName,
+      email,
+      plainPassword: password,
+      phone,
+      accountType,
+    });
+
+    const token = createToken(user);
+
+    res.cookie("authToken", token, {
+      httpOnly: true,
+      secure: false,
+      maxAge: 1000 * 60 * 60,
+      signed: true,
+      sameSite: "Lax",
+      path: "/",
+    });
+
+    return res.status(201).json(user);
+  } catch (err) {
+    console.error(err);
+
+    if (err.message === "Email already in use") {
+      return res.status(409).json({ message: "Email already in use" });
+    }
+
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -90,7 +157,6 @@ export const login = async (req, res) => {
   }
 };
 
-
 /**
  * Validate current session without middleware
  *
@@ -136,8 +202,6 @@ export const logout = (req, res) => {
     signed: true,
     path: "/",
   });
-
-  console.log(res);
 
   return res.json({ message: "Logged out" });
 };
