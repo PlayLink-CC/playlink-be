@@ -1,17 +1,17 @@
-// routes/Booking.js
 import express from "express";
 import { authenticate as authMiddleware } from "../middleware/auth.js";
 import {
   createCheckoutSession,
   handleCheckoutSuccess,
+  getMyBookings,
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
 
-// Create Stripe Checkout session + provisional booking
+// Stripe checkout
 router.post("/checkout-session", authMiddleware, createCheckoutSession);
-
-// Called from BookingSummary page after Stripe redirect
 router.get("/checkout-success", authMiddleware, handleCheckoutSuccess);
+
+router.get("/my", authMiddleware, getMyBookings);
 
 export default router;
