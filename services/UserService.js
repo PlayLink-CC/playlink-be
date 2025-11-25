@@ -90,3 +90,53 @@ export const logInUser = async (email, plainPassword) => {
     updatedAt: user.updated_at,
   };
 };
+
+/**
+ * Register a new user
+ *
+ * Checks for existing email, hashes password, creates user,
+ * and returns formatted user object.
+ *
+ * @async
+ * @param {Object} data
+ * @param {string} data.fullName
+ * @param {string} data.email
+ * @param {string} data.plainPassword
+ * @param {string} [data.phone]
+ * @param {string} [data.accountType] - Defaults to 'PLAYER'
+ * @returns {Promise<Object>} Newly created user object
+ * @throws {Error} 'Email already in use'
+ */
+export const registerUser = async ({
+  fullName,
+  email,
+  plainPassword,
+  phone,
+  accountType = "PLAYER",
+}) => {
+  const existing = await userRepository.findByEmail(email);
+
+  if (existing) {
+    throw new Error("Email already in use");
+  }
+
+  const passwordHash = await bcrypt.hash(plainPassword, 10);
+
+  const newUser = await userRepository.createUser({
+    fullName,
+    email,
+    passwordHash,
+    phone,
+    accountType,
+  });
+
+  return {
+    id: newUser.user_id,
+    fullName: newUser.full_name,
+    email: newUser.email,
+    phone: newUser.phone,
+    accountType: newUser.account_type,
+    createdAt: newUser.created_at,
+    updatedAt: newUser.updated_at,
+  };
+};

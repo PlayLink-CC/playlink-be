@@ -59,3 +59,51 @@ export const findByEmail = async (email) => {
   const [rows] = await connectDB.execute(sql, [email]);
   return rows[0]; // first user or undefined
 };
+
+/**
+ * Create a new user in the database
+ *
+ * Inserts a new user row and returns the created record.
+ *
+ * @async
+ * @param {Object} data
+ * @param {string} data.fullName
+ * @param {string} data.email
+ * @param {string} data.passwordHash
+ * @param {string} [data.phone]
+ * @param {string} data.accountType
+ * @returns {Promise<Object>} Newly created user record
+ * @throws {Error} Database connection error
+ */
+export const createUser = async ({
+  fullName,
+  email,
+  passwordHash,
+  phone,
+  accountType,
+}) => {
+  const insertSql = `
+    INSERT INTO users (full_name, email, password_hash, phone, account_type)
+    VALUES (?, ?, ?, ?, ?)
+  `;
+
+  const [result] = await connectDB.execute(insertSql, [
+    fullName,
+    email,
+    passwordHash,
+    phone ?? null,
+    accountType,
+  ]);
+
+  const newUserId = result.insertId;
+
+  const selectSql = `
+    SELECT user_id, full_name, email, phone, account_type, created_at, updated_at
+    FROM users
+    WHERE user_id = ?
+  `;
+
+  const [rows] = await connectDB.execute(selectSql, [newUserId]);
+
+  return rows[0];
+};

@@ -5,6 +5,7 @@
  * and user data retrieval.
  *
  * Public Routes:
+ * - POST /users/register - User registration
  * - POST /users/login - User authentication
  * - GET /users/authenticate - Session validation
  *
@@ -21,10 +22,17 @@ import {
   login,
   authenticateUser,
   logout,
+  register,
 } from "../controllers/UserController.js";
 import { authenticate as authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
+
+/**
+ * POST /users/register
+ * Public endpoint for user registration
+ */
+router.post("/register", register);
 
 /**
  * POST /users/login
