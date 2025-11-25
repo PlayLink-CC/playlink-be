@@ -37,7 +37,7 @@ export const getUsers = async () => {
   const users = await userRepository.findAll();
 
   return users.map((u) => ({
-    id: u.userid,
+    id: u.user_id,
     fullName: u.full_name,
     email: u.email,
     phone: u.phone,
@@ -81,7 +81,7 @@ export const logInUser = async (email, plainPassword) => {
   }
 
   return {
-    id: user.userid,
+    id: user.user_id,
     fullName: user.full_name,
     email: user.email,
     phone: user.phone,
