@@ -1,3 +1,20 @@
+/**
+ * User Routes
+ *
+ * Defines endpoints for user authentication, session management,
+ * and user data retrieval.
+ *
+ * Public Routes:
+ * - POST /users/login - User authentication
+ * - GET /users/authenticate - Session validation
+ *
+ * Protected Routes (require valid JWT token):
+ * - GET /users/me - Get current user profile
+ * - GET /users - List all users
+ *
+ * @module routes/User
+ */
+
 import express from "express";
 import {
   getAllUsers,
@@ -8,19 +25,31 @@ import { authenticate as authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Public: login
+/**
+ * POST /users/login
+ * Public endpoint for user authentication
+ */
 router.post("/login", login);
 
-// Public: check current session via cookie
+/**
+ * GET /users/authenticate
+ * Public endpoint to check current session from cookie
+ */
 router.get("/authenticate", authenticateUser);
 
-// Protected: example route to get current logged-in user info from token
+/**
+ * GET /users/me
+ * Protected endpoint to get current logged-in user info from token
+ */
 router.get("/me", authMiddleware, (req, res) => {
   // req.user is the payload from the token
   res.json({ user: req.user });
 });
 
-// Protected: get all users (if you want it protected)
+/**
+ * GET /users
+ * Protected endpoint to get all users
+ */
 router.get("/", authMiddleware, getAllUsers);
 
 export default router;
