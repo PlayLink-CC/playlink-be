@@ -79,7 +79,7 @@ export const login = async (req, res) => {
       secure: false, // for localhost
       maxAge: 1000 * 60 * 60, // 1 hour
       signed: true,
-      sameSite: "None",
+      sameSite: "Lax",
     });
 
     res.json(user);
