@@ -104,6 +104,20 @@ export const getTimeValidationError = (timeString, durationHours) => {
   if (!doesBookingFitInWindow(timeString, durationHours)) {
     return "Booking must end by 10:00 PM";
   }
-  
+
+  // Duration constraints: minimum 1 hour, maximum 4 hours
+  const duration = Number(durationHours);
+  if (Number.isNaN(duration)) {
+    return "Please select a valid duration";
+  }
+
+  if (duration < 1) {
+    return "Booking must be at least 1 hour";
+  }
+
+  if (duration > 4) {
+    return "Booking cannot exceed 4 hours";
+  }
+
   return null;
 };

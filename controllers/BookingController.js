@@ -44,6 +44,15 @@ export const createCheckoutSession = async (req, res) => {
     const start = new Date(`${date}T${time}:00`);
     const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
 
+    // 2a) Prevent bookings in the past
+    const now = new Date();
+    if (start.getTime() <= now.getTime()) {
+      return res.status(400).json({
+        message: "Invalid booking time",
+        details: "Bookings must be in the future"
+      });
+    }
+
     const bookingStart = toMySQLDateTime(start);
     const bookingEnd = toMySQLDateTime(end);
 
