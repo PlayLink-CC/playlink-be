@@ -75,74 +75,37 @@ export const createCheckoutSession = async (req, res) => {
     const totalAmount = pricePerHour * Number(hours); // e.g. 2500 * 2
     const amountInMinor = Math.round(totalAmount * 100); // Stripe wants cents
 
-    const pool = BookingRepository.getPool();
-    const conn = await pool.getConnection();
-
-    try {
-      await conn.beginTransaction();
-
-      // 4) Create booking (status = PENDING)
-      const bookingId = await BookingRepository.createBooking(conn, {
-        venueId: venue.venue_id,
-        userId,
-        bookingStart,
-        bookingEnd,
-        totalAmount,
-        cancellationPolicyId: venue.cancellation_policy_id,
-      });
-
-      // 5) Add initiator as participant
-      await BookingRepository.addBookingParticipant(conn, {
-        bookingId,
-        userId,
-        shareAmount: totalAmount,
-        isInitiator: 1,
-      });
-
-      // 6) Create Stripe Checkout Session
-      const session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        payment_method_types: ["card"],
-        customer_email: userEmail,
-        line_items: [
-          {
-            price_data: {
-              currency: "lkr", // or "usd" in test if needed
-              product_data: {
-                name: `${venue.name} booking`,
-              },
-              unit_amount: amountInMinor,
+    // 4) Create Stripe Checkout Session
+    // Do NOT create booking yet — only create it after successful payment
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      customer_email: userEmail,
+      line_items: [
+        {
+          price_data: {
+            currency: "lkr", // or "usd" in test if needed
+            product_data: {
+              name: `${venue.name} booking`,
             },
-            quantity: 1,
+            unit_amount: amountInMinor,
           },
-        ],
-        metadata: {
-          booking_id: String(bookingId),
-          venue_id: String(venue.venue_id),
-          user_id: String(userId),
+          quantity: 1,
         },
-        success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
-      });
+      ],
+      metadata: {
+        venue_id: String(venue.venue_id),
+        user_id: String(userId),
+        booking_start: bookingStart,
+        booking_end: bookingEnd,
+        total_amount: String(totalAmount),
+        cancellation_policy_id: String(venue.cancellation_policy_id),
+      },
+      success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
+    });
 
-      // 7) Record payment entry (PENDING)
-      await BookingRepository.createPayment(conn, {
-        bookingId,
-        payerId: userId,
-        amount: totalAmount,
-        currency: "LKR",
-        providerReference: session.id,
-      });
-
-      await conn.commit();
-      conn.release();
-
-      return res.json({ checkoutUrl: session.url });
-    } catch (err) {
-      await conn.rollback();
-      conn.release();
-      throw err;
-    }
+    return res.json({ checkoutUrl: session.url });
   } catch (err) {
     console.error("Error creating checkout session", err);
     return res.status(500).json({ message: "Server error" });
@@ -153,6 +116,7 @@ export const createCheckoutSession = async (req, res) => {
  * GET /api/bookings/checkout-success?session_id=cs_test_...
  *
  * Called from BookingSummary page after Stripe redirect.
+ * Creates the booking ONLY after payment is confirmed.
  */
 export const handleCheckoutSuccess = async (req, res) => {
   const { session_id } = req.query;
@@ -171,9 +135,11 @@ export const handleCheckoutSuccess = async (req, res) => {
         .json({ message: "Payment not completed", paymentStatus: session.payment_status });
     }
 
-    const bookingId = session.metadata?.booking_id;
-    if (!bookingId) {
-      return res.status(400).json({ message: "Missing booking_id in metadata" });
+    // 2) Extract booking details from Stripe session metadata
+    const { venue_id, user_id, booking_start, booking_end, total_amount, cancellation_policy_id } = session.metadata;
+
+    if (!venue_id || !user_id || !booking_start || !booking_end) {
+      return res.status(400).json({ message: "Missing booking details in session metadata" });
     }
 
     const pool = BookingRepository.getPool();
@@ -182,14 +148,39 @@ export const handleCheckoutSuccess = async (req, res) => {
     try {
       await conn.beginTransaction();
 
-      // 2) Update payment & booking statuses
-      await BookingRepository.updatePaymentStatus(conn, session.id, "SUCCEEDED");
+      // 3) NOW create the booking (status = CONFIRMED since payment succeeded)
+      const bookingId = await BookingRepository.createBooking(conn, {
+        venueId: venue_id,
+        userId: user_id,
+        bookingStart: booking_start,
+        bookingEnd: booking_end,
+        totalAmount: Number(total_amount),
+        cancellationPolicyId: cancellation_policy_id,
+      });
 
+      // 4) Add initiator as participant with PAID status
+      await BookingRepository.addBookingParticipant(conn, {
+        bookingId,
+        userId: user_id,
+        shareAmount: Number(total_amount),
+        isInitiator: 1,
+      });
+
+      // 5) Record payment entry (SUCCEEDED)
+      await BookingRepository.createPayment(conn, {
+        bookingId,
+        payerId: user_id,
+        amount: Number(total_amount),
+        currency: "LKR",
+        providerReference: session.id,
+      });
+
+      // 6) Update booking status to CONFIRMED and payment status to PAID
       await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
-
+      await BookingRepository.updatePaymentStatus(conn, session.id, "SUCCEEDED");
       await BookingRepository.updateParticipantsPaymentStatus(conn, bookingId, "PAID");
 
-      // 3) Return booking summary with venue info
+      // 7) Return booking summary with venue info
       const booking = await BookingRepository.getBookingWithVenue(conn, bookingId);
 
       await conn.commit();
