@@ -1,5 +1,11 @@
 import stripe from "../config/stripe.js";
-import { toMySQLDateTime } from "../utils/dateUtil.js";
+import { 
+  toMySQLDateTime,
+  isValid15MinInterval,
+  isWithinBookingWindow,
+  doesBookingFitInWindow,
+  getTimeValidationError 
+} from "../utils/dateUtil.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
 
 /**
@@ -18,6 +24,15 @@ export const createCheckoutSession = async (req, res) => {
   }
 
   try {
+    // 0) Validate time format and constraints
+    const timeValidationError = getTimeValidationError(time, Number(hours));
+    if (timeValidationError) {
+      return res.status(400).json({ 
+        message: "Invalid booking time",
+        details: timeValidationError 
+      });
+    }
+
     // 1) Get venue price & cancellation policy
     const venue = await BookingRepository.getVenueById(venueId);
 
@@ -29,8 +44,31 @@ export const createCheckoutSession = async (req, res) => {
     const start = new Date(`${date}T${time}:00`);
     const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
 
+    // 2a) Prevent bookings in the past
+    const now = new Date();
+    if (start.getTime() <= now.getTime()) {
+      return res.status(400).json({
+        message: "Invalid booking time",
+        details: "Bookings must be in the future"
+      });
+    }
+
     const bookingStart = toMySQLDateTime(start);
     const bookingEnd = toMySQLDateTime(end);
+
+    // 2.5) Check for booking conflicts (double booking prevention)
+    const hasConflict = await BookingRepository.hasBookingConflict(
+      venueId,
+      bookingStart,
+      bookingEnd
+    );
+
+    if (hasConflict) {
+      return res.status(409).json({
+        message: "This time slot is already booked. Please select a different time.",
+        conflictDetected: true,
+      });
+    }
 
     // 3) Compute total amount (LKR)
     const pricePerHour = Number(venue.price_per_hour);
@@ -172,6 +210,28 @@ export const handleCheckoutSuccess = async (req, res) => {
   } catch (err) {
     console.error("Error confirming checkout session", err);
     return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * GET /api/bookings/booked-slots/:venueId?date=YYYY-MM-DD
+ *
+ * Fetch all booked slots for a specific venue on a specific date
+ */
+export const getBookedSlots = async (req, res) => {
+  const { venueId } = req.params;
+  const { date } = req.query;
+
+  if (!venueId || !date) {
+    return res.status(400).json({ message: "Missing venueId or date parameter" });
+  }
+
+  try {
+    const slots = await BookingRepository.getBookedSlotsForDate(venueId, date);
+    return res.json({ slots });
+  } catch (err) {
+    console.error("Error fetching booked slots:", err);
+    return res.status(500).json({ message: "Server error while fetching booked slots" });
   }
 };
 
