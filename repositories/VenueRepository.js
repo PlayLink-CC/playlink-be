@@ -25,6 +25,7 @@ import connectDB from "../config/dbconnection.js";
  * - Associated sports (court types)
  * - Primary venue image
  * - Available amenities
+ * - Description
  *
  * @async
  * @returns {Promise<Object[]>} Array of venue objects
@@ -35,6 +36,7 @@ import connectDB from "../config/dbconnection.js";
  * @returns {number} rows[].price_per_hour - Hourly rate
  * @returns {string} rows[].primary_image - URL of main image
  * @returns {string} rows[].amenities - Comma-separated amenity list
+ * @returns {string} rows[].description - Venue description
  * @throws {Error} Database connection error
  */
 export const findAllVenues = async () => {
@@ -46,7 +48,8 @@ export const findAllVenues = async () => {
         GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
         v.price_per_hour,
         vi.image_url AS primary_image,
-        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        v.description
     FROM venues v
     LEFT JOIN venue_sports vs 
         ON vs.venue_id = v.venue_id
@@ -64,7 +67,8 @@ export const findAllVenues = async () => {
         v.name,
         location,
         v.price_per_hour,
-        vi.image_url
+        vi.image_url,
+        v.description
   `;
 
   const [rows] = await connectDB.execute(sql);
@@ -87,6 +91,8 @@ export const findAllVenues = async () => {
  * @returns {number} rows[].price_per_hour - Hourly rate
  * @returns {string} rows[].primary_image - URL of main image
  * @returns {string} rows[].amenities - Comma-separated amenity list
+ * @returns {string} rows[].court_types - Comma-separated sports
+ * @returns {string} rows[].description - Venue description
  * @returns {number} rows[].bookings_this_week - Number of bookings
  * @throws {Error} Database connection error
  */
@@ -98,7 +104,9 @@ export const findMostBookedVenuesThisWeek = async () => {
         CONCAT(v.address, ', ', v.city) AS location,
         v.price_per_hour,
         vi.image_url AS primary_image,
-        GROUP_CONCAT(a.name ORDER BY a.name SEPARATOR ', ') AS amenities,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR ', ') AS amenities,
+        GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS court_types,
+        v.description,
         COUNT(b.booking_id) AS bookings_this_week
     FROM venues v
     LEFT JOIN bookings b 
@@ -113,6 +121,10 @@ export const findMostBookedVenuesThisWeek = async () => {
         ON va.venue_id = v.venue_id
     LEFT JOIN amenities a 
         ON a.amenity_id = va.amenity_id
+    LEFT JOIN venue_sports vs 
+        ON vs.venue_id = v.venue_id
+    LEFT JOIN sports s 
+        ON s.sport_id = vs.sport_id
     WHERE v.is_active = 1
     GROUP BY 
         v.venue_id,
@@ -120,7 +132,8 @@ export const findMostBookedVenuesThisWeek = async () => {
         v.address,
         v.city,
         v.price_per_hour,
-        vi.image_url
+        vi.image_url,
+        v.description
     ORDER BY bookings_this_week DESC
     LIMIT 4;
   `;
@@ -149,6 +162,7 @@ export const findMostBookedVenuesThisWeek = async () => {
  * @returns {number} rows[].price_per_hour - Hourly rate
  * @returns {string} rows[].primary_image - URL of main image
  * @returns {string} rows[].amenities - Comma-separated amenity list
+ * @returns {string} rows[].description - Venue description
  * @throws {Error} Database connection error
  */
 export const findVenuesBySearch = async (searchText) => {
@@ -160,7 +174,8 @@ export const findVenuesBySearch = async (searchText) => {
         GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
         v.price_per_hour,
         vi.image_url AS primary_image,
-        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        v.description
     FROM venues v
     LEFT JOIN venue_sports vs 
         ON vs.venue_id = v.venue_id
@@ -182,7 +197,8 @@ export const findVenuesBySearch = async (searchText) => {
         v.name,
         location,
         v.price_per_hour,
-        vi.image_url
+        vi.image_url,
+        v.description
   `;
 
   const searchPattern = `%${searchText}%`;

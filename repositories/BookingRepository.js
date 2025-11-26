@@ -281,6 +281,65 @@ export const getUserBookings = async (userId) => {
 };
 
 /**
+ * Check for booking conflicts in a time slot
+ *
+ * Checks if there are any CONFIRMED bookings that overlap
+ * with the requested time slot for a specific venue.
+ *
+ * @async
+ * @param {number} venueId - Venue ID
+ * @param {string} startDateTime - Start datetime (YYYY-MM-DD HH:MM:SS)
+ * @param {string} endDateTime - End datetime (YYYY-MM-DD HH:MM:SS)
+ * @returns {Promise<boolean>} True if there's a conflict, false otherwise
+ * @throws {Error} Database query error
+ */
+export const hasBookingConflict = async (venueId, startDateTime, endDateTime) => {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS conflict_count
+     FROM bookings
+     WHERE venue_id = ?
+     AND status IN ('CONFIRMED', 'PENDING')
+     AND (
+       (booking_start < ? AND booking_end > ?) OR
+       (booking_start >= ? AND booking_start < ?) OR
+       (booking_end > ? AND booking_end <= ?)
+     )`,
+    [venueId, endDateTime, startDateTime, startDateTime, endDateTime, startDateTime, endDateTime]
+  );
+
+  return rows[0].conflict_count > 0;
+};
+
+/**
+ * Get all booked slots for a venue on a specific date
+ *
+ * Retrieves all confirmed and pending bookings for a venue
+ * on a given date, useful for displaying availability calendar.
+ *
+ * @async
+ * @param {number} venueId - Venue ID
+ * @param {string} date - Date in YYYY-MM-DD format
+ * @returns {Promise<Object[]>} Array of booking slots
+ * @returns {string} slots[].booking_start - Start datetime
+ * @returns {string} slots[].booking_end - End datetime
+ * @returns {string} slots[].status - Booking status
+ * @throws {Error} Database query error
+ */
+export const getBookedSlotsForDate = async (venueId, date) => {
+  const [rows] = await pool.execute(
+    `SELECT booking_start, booking_end, status
+     FROM bookings
+     WHERE venue_id = ?
+     AND DATE(booking_start) = ?
+     AND status IN ('CONFIRMED', 'PENDING')
+     ORDER BY booking_start ASC`,
+    [venueId, date]
+  );
+
+  return rows;
+};
+
+/**
  * Get database pool connection
  *
  * Returns the connection pool for transaction management.
