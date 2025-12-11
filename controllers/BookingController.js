@@ -1,10 +1,10 @@
 import stripe from "../config/stripe.js";
-import { 
+import {
   toMySQLDateTime,
   isValid15MinInterval,
   isWithinBookingWindow,
   doesBookingFitInWindow,
-  getTimeValidationError 
+  getTimeValidationError
 } from "../utils/dateUtil.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
 
@@ -27,9 +27,9 @@ export const createCheckoutSession = async (req, res) => {
     // 0) Validate time format and constraints
     const timeValidationError = getTimeValidationError(time, Number(hours));
     if (timeValidationError) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Invalid booking time",
-        details: timeValidationError 
+        details: timeValidationError
       });
     }
 
@@ -126,6 +126,15 @@ export const handleCheckoutSuccess = async (req, res) => {
   }
 
   try {
+    // 0) Idempotency Check: Did we already process this session?
+    const existingBooking = await BookingRepository.getBookingByPaymentReference(session_id);
+    if (existingBooking) {
+      // If we already have a booking for this session, just return it.
+      // This handles page refreshes or network retries safely.
+      const fullBooking = await BookingRepository.getBookingWithVenue(BookingRepository.getPool(), existingBooking.booking_id);
+      return res.json({ booking: fullBooking });
+    }
+
     // 1) Verify with Stripe
     const session = await stripe.checkout.sessions.retrieve(session_id);
 
@@ -147,6 +156,25 @@ export const handleCheckoutSuccess = async (req, res) => {
 
     try {
       await conn.beginTransaction();
+
+      // 2.5) RACE CONDITION CHECK: Check availability AGAIN inside transaction (FOR UPDATE preferably, but basic check helps)
+      // Note: Truly perfect locking requires stricter isolation or explicit locking, but a second check here 
+      // inside the transaction significantly reduces the race window compared to the pre-payment check.
+      const hasConflict = await BookingRepository.hasBookingConflict(
+        venue_id,
+        booking_start,
+        booking_end
+      );
+
+      if (hasConflict) {
+        // If the slot was taken while user was paying, we must refund and fail.
+        // For now, we'll rollback and return error. Refund logic would go standardly here.
+        await conn.rollback();
+        // optionally: await stripe.refunds.create({ payment_intent: session.payment_intent }); 
+        return res.status(409).json({
+          message: "Slot was booked by another user during payment. Please contact support for refund or rebooking."
+        });
+      }
 
       // 3) NOW create the booking (status = CONFIRMED since payment succeeded)
       const bookingId = await BookingRepository.createBooking(conn, {

@@ -339,6 +339,29 @@ export const getBookedSlotsForDate = async (venueId, date) => {
   return rows;
 };
 
+
+/**
+ * Get booking by payment provider reference (Stripe Session ID)
+ *
+ * Checks if a booking already exists for a given payment session.
+ * Used for idempotency to prevent duplicate bookings.
+ *
+ * @async
+ * @param {string} providerRef - Stripe session ID
+ * @returns {Promise<Object|null>} Booking object if found
+ */
+export const getBookingByPaymentReference = async (providerRef) => {
+  const [rows] = await pool.execute(
+    `SELECT b.* 
+     FROM bookings b
+     JOIN payments p ON b.booking_id = p.booking_id
+     WHERE p.provider_reference = ?
+     LIMIT 1`,
+    [providerRef]
+  );
+  return rows[0] || null;
+};
+
 /**
  * Get database pool connection
  *
