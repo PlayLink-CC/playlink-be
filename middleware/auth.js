@@ -1,10 +1,7 @@
 /**
- * Authentication Middleware
+ * Authentication & Authorization Middleware
  *
- * Validates JWT tokens from signed cookies and attaches
- * user information to request object for downstream use.
- *
- * Should be used on protected routes that require authentication.
+ * Validates JWT tokens and enforces Role-Based Access Control (RBAC).
  *
  * @module middleware/auth
  */
@@ -13,24 +10,6 @@ import { verifyToken } from "../utils/authUtil.js";
 
 /**
  * Authenticate request using JWT token from signed cookie
- *
- * Extracts authToken from signed cookies, verifies its validity,
- * and attaches decoded user payload to req.user for use in
- * subsequent middleware and route handlers.
- *
- * @middleware
- * @param {Object} req - Express request object
- * @param {Object} req.signedCookies - Signed cookies from request
- * @param {string} [req.signedCookies.authToken] - JWT token from cookie
- * @param {Object} res - Express response object
- * @param {Function} next - Express next middleware function
- * @returns {void} Calls next() on success, sends error response on failure
- * @throws {Error} 403 - Token missing, invalid, or expired
- *
- * @example
- * router.get('/protected', authenticate, (req, res) => {
- *   console.log(req.user.id); // User ID from token
- * });
  */
 export const authenticate = (req, res, next) => {
   const token = req.signedCookies.authToken;
@@ -49,4 +28,32 @@ export const authenticate = (req, res, next) => {
     console.error(err);
     return res.status(403).json({ error: "Token is invalid or expired" });
   }
+};
+
+/**
+ * Authorize user based on allowed roles
+ *
+ * Checks if the authenticated user's account type matches one of the
+ * allowed roles for this route. Must be placed AFTER 'authenticate'.
+ *
+ * @param {string[]} allowedRoles - Array of allowed account types (e.g. ['VENUE_OWNER', 'ADMIN'])
+ * @returns {Function} Express middleware
+ */
+export const authorize = (allowedRoles = []) => {
+  return (req, res, next) => {
+    // 1. Ensure user is authenticated
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized: User not authenticated" });
+    }
+
+    // 2. Check if user's role is allowed
+    // Note: req.user.accountType comes from the JWT payload created in authUtil.js
+    if (!allowedRoles.includes(req.user.accountType)) {
+      return res.status(403).json({
+        message: "Forbidden: You do not have permission to perform this action."
+      });
+    }
+
+    next();
+  };
 };
