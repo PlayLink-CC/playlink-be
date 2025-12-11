@@ -73,12 +73,22 @@ export const register = async (req, res) => {
         .json({ message: "Password must be at least 8 characters long" });
     }
 
+    // Default to USER, but allow VENUE_OWNER if specified
+    let finalAccountType = "USER";
+    if (accountType) {
+      const allowedTypes = ["USER", "VENUE_OWNER"];
+      if (!allowedTypes.includes(accountType)) {
+        return res.status(400).json({ message: "Invalid account type" });
+      }
+      finalAccountType = accountType;
+    }
+
     const user = await registerUser({
       fullName,
       email,
       plainPassword: password,
       phone,
-      accountType,
+      accountType: finalAccountType,
     });
 
     const token = createToken(user);

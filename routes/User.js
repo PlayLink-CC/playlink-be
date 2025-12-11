@@ -24,7 +24,7 @@ import {
   logout,
   register,
 } from "../controllers/UserController.js";
-import { authenticate as authMiddleware } from "../middleware/auth.js";
+import { authenticate as authMiddleware, authorize } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -66,5 +66,21 @@ router.get("/me", authMiddleware, (req, res) => {
  * Protected endpoint to get all users
  */
 router.get("/", authMiddleware, getAllUsers);
+
+/**
+ * GET /users/venue-owner-test
+ * Protected endpoint accessible ONLY by Venue Owners
+ */
+router.get(
+  "/venue-owner-test",
+  authMiddleware,
+  authorize(["VENUE_OWNER"]), // Only allow VENUE_OWNER
+  (req, res) => {
+    res.json({
+      message: "Success! You are seeing this because you are a Venue Owner.",
+      user: req.user
+    });
+  }
+);
 
 export default router;
