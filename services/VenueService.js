@@ -92,8 +92,8 @@ export const updateVenue = async (venueId, updates) => {
 /**
  * Block a venue slot
  */
-export const blockVenueSlot = async (venueId, start, end, reason) => {
-  return await BookingRepository.createBlock(venueId, start, end, reason);
+export const blockVenueSlot = async (venueId, userId, start, end, reason) => {
+  return await BookingRepository.createBlock(venueId, userId, start, end, reason);
 };
 
 /**

@@ -154,7 +154,14 @@ export const addReview = async (req, res) => {
  */
 export const update = async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
+
+  const updates = { ...req.body };
+
+  // Map frontend casing to DB column
+  if (updates.pricePerHour) {
+    updates.price_per_hour = updates.pricePerHour;
+    delete updates.pricePerHour;
+  }
 
   try {
     const success = await updateVenueService(id, updates);
@@ -174,15 +181,19 @@ export const update = async (req, res) => {
  */
 export const blockSlot = async (req, res) => {
   const { id } = req.params;
-  const { date, time, hours, reason } = req.body;
+  const { date, startTime, endTime, reason } = req.body;
 
-  if (!date || !time || !hours) {
+  if (!date || !startTime || !endTime) {
     return res.status(400).json({ message: "Missing blocking details" });
   }
 
   try {
-    const start = new Date(`${date}T${time}:00`);
-    const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
+    const start = new Date(`${date}T${startTime}:00`);
+    const end = new Date(`${date}T${endTime}:00`);
+
+    if (end <= start) {
+      return res.status(400).json({ message: "End time must be after start time" });
+    }
 
     // Check conflicts
     const bookingStart = start.toISOString().slice(0, 19).replace('T', ' ');
@@ -193,7 +204,7 @@ export const blockSlot = async (req, res) => {
       return res.status(409).json({ message: "Slot already booked or blocked" });
     }
 
-    await blockVenueSlot(id, bookingStart, bookingEnd, reason);
+    await blockVenueSlot(id, req.user.id, bookingStart, bookingEnd, reason);
     res.status(201).json({ message: "Slot blocked successfully" });
   } catch (err) {
     console.error("Error blocking slot:", err);
