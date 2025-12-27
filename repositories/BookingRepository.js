@@ -363,6 +363,94 @@ export const getBookingByPaymentReference = async (providerRef) => {
 };
 
 /**
+ * Get all bookings for an owner's venues
+ *
+ * Fetches all bookings for venues owned by the specified user
+ *
+ * @async
+ * @param {number} ownerId - Owner User ID
+ * @returns {Promise<Object[]>} Array of booking objects
+ */
+export const getOwnerBookings = async (ownerId) => {
+  const [rows] = await pool.execute(
+    `SELECT
+       b.booking_id,
+       b.booking_start,
+       b.booking_end,
+       b.total_amount,
+       b.status,
+       b.created_at,
+       v.name AS venue_name,
+       u.full_name AS customer_name,
+       u.email AS customer_email
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     LEFT JOIN users u ON b.created_by = u.user_id
+     WHERE v.owner_id = ?
+     ORDER BY b.booking_start DESC`,
+    [ownerId]
+  );
+  return rows;
+};
+
+/**
+ * Get analytics summary for an owner
+ *
+ * Aggregates statistics for owner's venues:
+ * - Total Bookings
+ * - Total Revenue
+ * - Active Venues Count
+ *
+ * @async
+ * @param {number} ownerId - Owner User ID
+ * @returns {Promise<Object>} Analytics summary object
+ */
+export const getOwnerAnalytics = async (ownerId) => {
+  const [bookingStats] = await pool.execute(
+    `SELECT
+       COUNT(*) AS total_bookings,
+       COALESCE(SUM(total_amount), 0) AS total_revenue
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     WHERE v.owner_id = ?
+     AND b.status IN ('CONFIRMED', 'COMPLETED')`,
+    [ownerId]
+  );
+
+  const [venueStats] = await pool.execute(
+    `SELECT COUNT(*) AS active_venues
+     FROM venues
+     WHERE owner_id = ? AND is_active = 1`,
+    [ownerId]
+  );
+
+  return {
+    ...bookingStats[0],
+    ...venueStats[0]
+  };
+};
+
+/**
+ * Check if user has a completed booking for a venue
+ *
+ * @async
+ * @param {number} userId - User ID
+ * @param {number} venueId - Venue ID
+ * @returns {Promise<boolean>} True if user has completed booking
+ */
+export const hasUserCompletedBooking = async (userId, venueId) => {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS count
+     FROM bookings
+     WHERE created_by = ?
+     AND venue_id = ?
+     AND status = 'COMPLETED'`, // Assuming 'COMPLETED' is the status for past bookings
+    [userId, venueId]
+  );
+  return rows[0].count > 0;
+};
+
+/**
  * Get database pool connection
  *
  * Returns the connection pool for transaction management.

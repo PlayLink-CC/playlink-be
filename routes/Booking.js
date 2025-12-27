@@ -5,6 +5,7 @@ import {
   handleCheckoutSuccess,
   getMyBookings,
   getBookedSlots,
+  getOwnerBookings,
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -14,6 +15,7 @@ router.post("/checkout-session", authMiddleware, createCheckoutSession);
 router.get("/checkout-success", authMiddleware, handleCheckoutSuccess);
 
 router.get("/my", authMiddleware, getMyBookings);
+router.get("/owner", authMiddleware, getOwnerBookings);
 
 // Get booked slots for a venue on a specific date
 router.get("/booked-slots/:venueId", getBookedSlots);

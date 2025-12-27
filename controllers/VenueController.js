@@ -19,6 +19,8 @@ import {
   searchVenues,
   createVenue,
 } from "../services/VenueService.js";
+import * as VenueRepository from "../repositories/VenueRepository.js";
+import * as BookingRepository from "../repositories/BookingRepository.js";
 
 /**
  * Fetch all venues or search by query parameter
@@ -100,6 +102,44 @@ export const create = async (req, res) => {
     res.status(201).json(result);
   } catch (err) {
     console.error("Error creating venue:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * POST /api/venues/:id/reviews
+ * 
+ * Submit a review for a venue. User must have a completed booking.
+ */
+export const addReview = async (req, res) => {
+  const venueId = req.params.id;
+  const userId = req.user.id;
+  const { rating, comment } = req.body;
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ message: "Invalid rating (1-5)" });
+  }
+
+  try {
+    // 1. Verify completed booking
+    const hasCompleted = await BookingRepository.hasUserCompletedBooking(userId, venueId);
+    if (!hasCompleted) {
+      return res.status(403).json({
+        message: "You can only review venues you have stayed at (completed booking required)."
+      });
+    }
+
+    // 2. Create review
+    await VenueRepository.createReview({
+      venueId,
+      userId,
+      rating,
+      comment
+    });
+
+    res.status(201).json({ message: "Review submitted successfully" });
+  } catch (err) {
+    console.error("Error creating review:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

@@ -15,6 +15,7 @@ import express from "express";
 import userRoutes from "./User.js";
 import venueRoutes from "./Venue.js";
 import bookingRoutes from "./Booking.js";
+import analyticsRoutes from "./Analytics.js";
 
 const router = express.Router();
 
@@ -22,5 +23,6 @@ const router = express.Router();
 router.use("/users", userRoutes);
 router.use("/venues", venueRoutes);
 router.use("/bookings", bookingRoutes);
+router.use("/analytics", analyticsRoutes);
 
 export default router;

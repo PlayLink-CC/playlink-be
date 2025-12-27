@@ -305,3 +305,18 @@ export const createVenue = async (venueData) => {
         conn.release();
     }
 };
+
+/**
+ * Create a new venue review
+ * 
+ * @async
+ * @param {Object} reviewData
+ * @returns {Promise<number>} New review ID
+ */
+export const createReview = async ({ venueId, userId, rating, comment }) => {
+    const [result] = await connectDB.execute(
+        `INSERT INTO reviews (venue_id, user_id, rating, comment) VALUES (?, ?, ?, ?)`,
+        [venueId, userId, rating, comment]
+    );
+    return result.insertId;
+};

@@ -272,3 +272,20 @@ export const getMyBookings = async (req, res) => {
       .json({ message: "Server error while fetching bookings" });
   }
 };
+
+/**
+ * GET /api/bookings/owner
+ * 
+ * Fetch all bookings for venues owned by the authenticated user
+ */
+export const getOwnerBookings = async (req, res) => {
+  const userId = req.user.id; // from auth middleware
+
+  try {
+    const bookings = await BookingRepository.getOwnerBookings(userId);
+    return res.json({ bookings });
+  } catch (err) {
+    console.error("Error fetching owner bookings:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
