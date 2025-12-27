@@ -313,7 +313,7 @@ export const hasBookingConflict = async (venueId, startDateTime, endDateTime) =>
     `SELECT COUNT(*) AS conflict_count
      FROM bookings
      WHERE venue_id = ?
-     AND status IN ('CONFIRMED', 'PENDING')
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
      AND (
        (booking_start < ? AND booking_end > ?) OR
        (booking_start >= ? AND booking_start < ?) OR
@@ -346,7 +346,7 @@ export const getBookedSlotsForDate = async (venueId, date) => {
      FROM bookings
      WHERE venue_id = ?
      AND DATE(booking_start) = ?
-     AND status IN ('CONFIRMED', 'PENDING')
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
      ORDER BY booking_start ASC`,
     [venueId, date]
   );
@@ -402,7 +402,6 @@ export const getOwnerBookings = async (ownerId) => {
      JOIN venues v ON b.venue_id = v.venue_id
      LEFT JOIN users u ON b.created_by = u.user_id
      WHERE v.owner_id = ?
-     AND b.status != 'BLOCKED'
      ORDER BY b.booking_start DESC`,
     [ownerId]
   );

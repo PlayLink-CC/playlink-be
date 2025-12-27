@@ -25,6 +25,7 @@ import {
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
+import { toMySQLDateTime } from "../utils/dateUtil.js";
 
 /**
  * Fetch all venues or search by query parameter
@@ -196,8 +197,8 @@ export const blockSlot = async (req, res) => {
     }
 
     // Check conflicts
-    const bookingStart = start.toISOString().slice(0, 19).replace('T', ' ');
-    const bookingEnd = end.toISOString().slice(0, 19).replace('T', ' ');
+    const bookingStart = toMySQLDateTime(start);
+    const bookingEnd = toMySQLDateTime(end);
 
     const hasConflict = await BookingRepository.hasBookingConflict(id, bookingStart, bookingEnd);
     if (hasConflict) {
