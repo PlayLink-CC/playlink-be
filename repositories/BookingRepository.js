@@ -280,6 +280,24 @@ export const getUserBookings = async (userId) => {
   return rows;
 };
 
+export const createBlock = async (venueId, startTime, endTime) => {
+  // Assuming 'status' column can hold 'BLOCKED'
+  // If user_id is NOT NULL, we might need a system user or allow NULL for blocks.
+  // Based on schema inference, let's try NULL for now as it's a block.
+  const sql = `
+        INSERT INTO bookings (venue_id, booking_start, booking_end, total_amount, status)
+        VALUES (?, ?, ?, 0, 'BLOCKED')
+    `;
+  const [result] = await pool.execute(sql, [venueId, startTime, endTime]);
+  return result.insertId;
+};
+
+export const getPricingRules = async (venueId) => {
+  const sql = `SELECT * FROM venue_pricing_rules WHERE venue_id = ?`;
+  const [rows] = await pool.execute(sql, [venueId]);
+  return rows;
+};
+
 /**
  * Check for booking conflicts in a time slot
  *

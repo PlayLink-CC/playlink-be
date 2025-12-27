@@ -36,6 +36,11 @@ router.get("/top-weekly", VenueController.fetchTopWeeklyVenues);
  * Only VENUE_OWNER can create a venue
  */
 router.post("/", authenticate, authorize(["VENUE_OWNER"]), VenueController.create);
+router.get("/my-venues", authenticate, authorize(["VENUE_OWNER"]), VenueController.fetchMyVenues);
+
+router.get("/:id", VenueController.fetchVenueById);
+router.put("/:id", authenticate, authorize(["VENUE_OWNER"]), VenueController.update);
+router.post("/:id/block", authenticate, authorize(["VENUE_OWNER"]), VenueController.blockSlot);
 
 router.post("/:id/reviews", authenticate, VenueController.addReview);
 

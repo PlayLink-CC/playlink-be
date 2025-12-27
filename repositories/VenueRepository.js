@@ -320,3 +320,114 @@ export const createReview = async ({ venueId, userId, rating, comment }) => {
     );
     return result.insertId;
 };
+
+/**
+ * Update venue details
+ * 
+ * @async
+ * @param {number} venueId
+ * @param {Object} updates - Fields to update
+ * @returns {Promise<boolean>} True if updated
+ */
+export const updateVenue = async (venueId, updates) => {
+    const validFields = ['name', 'description', 'price_per_hour', 'address', 'city'];
+    const fieldsToUpdate = [];
+    const values = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+        if (validFields.includes(key)) {
+            fieldsToUpdate.push(`${key} = ?`);
+            values.push(value);
+        }
+    }
+
+    if (fieldsToUpdate.length === 0) return false;
+
+    // Add updated_at timestamp
+    fieldsToUpdate.push('updated_at = NOW()');
+    values.push(venueId);
+
+    const sql = `UPDATE venues SET ${fieldsToUpdate.join(', ')} WHERE venue_id = ?`;
+
+    const [result] = await connectDB.execute(sql, values);
+    return result.affectedRows > 0;
+};
+
+/**
+ * Find venues by owner ID
+ * 
+ * @async
+ * @param {number} ownerId
+ * @returns {Promise<Object[]>} Array of venues
+ */
+export const findVenuesByOwner = async (ownerId) => {
+    const sql = `
+        SELECT 
+            v.venue_id,
+            v.name AS venue_name,
+            v.address,
+            v.city,
+            v.price_per_hour,
+            v.is_active,
+            vi.image_url AS primary_image
+        FROM venues v
+        LEFT JOIN venue_images vi 
+            ON vi.venue_id = v.venue_id
+            AND vi.is_primary = 1
+        WHERE v.owner_id = ?
+        ORDER BY v.created_at DESC
+    `;
+    const [rows] = await connectDB.execute(sql, [ownerId]);
+    return rows;
+};
+
+/**
+ * Find a specific venue by ID
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<Object>} Venue object or null
+ */
+export const findVenueById = async (venueId) => {
+    const sql = `
+    SELECT 
+        v.venue_id,
+        v.name AS venue_name,
+        v.owner_id,
+        v.address,
+        v.city,
+        CONCAT_WS(', ', v.address, v.city) AS location,
+        GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
+        v.price_per_hour,
+        vi.image_url AS primary_image,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        v.description,
+        v.cancellation_policy_id
+    FROM venues v
+    LEFT JOIN venue_sports vs 
+        ON vs.venue_id = v.venue_id
+    LEFT JOIN sports s 
+        ON s.sport_id = vs.sport_id
+    LEFT JOIN venue_images vi 
+        ON vi.venue_id = v.venue_id
+        AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va 
+        ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a 
+        ON a.amenity_id = va.amenity_id
+    WHERE v.venue_id = ?
+    GROUP BY 
+        v.venue_id,
+        v.name,
+        v.owner_id,
+        v.address,
+        v.city,
+        location,
+        v.price_per_hour,
+        vi.image_url,
+        v.description,
+        v.cancellation_policy_id
+    `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows[0];
+};

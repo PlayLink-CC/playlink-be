@@ -18,6 +18,10 @@ import {
   findMostBookedVenuesThisWeek,
   searchVenues,
   createVenue,
+  updateVenue as updateVenueService,
+  blockVenueSlot,
+  getVenuesByOwner,
+  getVenueById,
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
@@ -140,6 +144,92 @@ export const addReview = async (req, res) => {
     res.status(201).json({ message: "Review submitted successfully" });
   } catch (err) {
     console.error("Error creating review:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Update a venue
+ * PUT /api/venues/:id
+ */
+export const update = async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+
+  try {
+    const success = await updateVenueService(id, updates);
+    if (!success) {
+      return res.status(404).json({ message: "Venue not found or no changes made" });
+    }
+    res.json({ message: "Venue updated successfully" });
+  } catch (err) {
+    console.error("Error updating venue:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Manually block a time slot
+ * POST /api/venues/:id/block
+ */
+export const blockSlot = async (req, res) => {
+  const { id } = req.params;
+  const { date, time, hours, reason } = req.body;
+
+  if (!date || !time || !hours) {
+    return res.status(400).json({ message: "Missing blocking details" });
+  }
+
+  try {
+    const start = new Date(`${date}T${time}:00`);
+    const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
+
+    // Check conflicts
+    const bookingStart = start.toISOString().slice(0, 19).replace('T', ' ');
+    const bookingEnd = end.toISOString().slice(0, 19).replace('T', ' ');
+
+    const hasConflict = await BookingRepository.hasBookingConflict(id, bookingStart, bookingEnd);
+    if (hasConflict) {
+      return res.status(409).json({ message: "Slot already booked or blocked" });
+    }
+
+    await blockVenueSlot(id, bookingStart, bookingEnd, reason);
+    res.status(201).json({ message: "Slot blocked successfully" });
+  } catch (err) {
+    console.error("Error blocking slot:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Fetch venues owned by the authenticated user
+ * GET /api/venues/my-venues
+ */
+export const fetchMyVenues = async (req, res) => {
+  const ownerId = req.user.id;
+  try {
+    const venues = await getVenuesByOwner(ownerId);
+    res.json(venues);
+  } catch (err) {
+    console.error("Error fetching my venues:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Fetch venue details by ID
+ * GET /api/venues/:id
+ */
+export const fetchVenueById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const venue = await getVenueById(id);
+    res.json(venue);
+  } catch (err) {
+    console.error("Error fetching venue by ID:", err);
+    if (err.message === "Venue not found") {
+      return res.status(404).json({ message: "Venue not found" });
+    }
     res.status(500).json({ message: "Server error" });
   }
 };

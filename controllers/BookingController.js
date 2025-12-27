@@ -7,6 +7,7 @@ import {
   getTimeValidationError
 } from "../utils/dateUtil.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
+import { calculateDynamicPrice } from "../services/VenueService.js";
 
 /**
  * POST /api/bookings/checkout-session
@@ -70,9 +71,10 @@ export const createCheckoutSession = async (req, res) => {
       });
     }
 
-    // 3) Compute total amount (LKR)
-    const pricePerHour = Number(venue.price_per_hour);
-    const totalAmount = pricePerHour * Number(hours); // e.g. 2500 * 2
+    // 3) Compute total amount (LKR) with Dynamic Pricing
+    // const pricePerHour = Number(venue.price_per_hour);
+    // const totalAmount = pricePerHour * Number(hours); 
+    const totalAmount = await calculateDynamicPrice(venue, date, time, hours);
     const amountInMinor = Math.round(totalAmount * 100); // Stripe wants cents
 
     // 4) Create Stripe Checkout Session
@@ -253,6 +255,9 @@ export const getBookedSlots = async (req, res) => {
     return res.status(500).json({ message: "Server error while fetching booked slots" });
   }
 };
+
+
+
 
 /**
  * GET /api/bookings/my-bookings
