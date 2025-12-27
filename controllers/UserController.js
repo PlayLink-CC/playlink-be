@@ -73,14 +73,19 @@ export const register = async (req, res) => {
         .json({ message: "Password must be at least 8 characters long" });
     }
 
-    // Default to USER, but allow VENUE_OWNER if specified
-    let finalAccountType = "USER";
+    // Default to PLAYER (standard user), but allow VENUE_OWNER if specified
+    let finalAccountType = "PLAYER";
     if (accountType) {
-      const allowedTypes = ["USER", "VENUE_OWNER"];
-      if (!allowedTypes.includes(accountType)) {
+      // Map 'USER' to 'PLAYER' for frontend compatibility if needed, or just accept PLAYER/VENUE_OWNER
+      if (accountType === "USER") {
+        finalAccountType = "PLAYER";
+      } else if (accountType === "VENUE_OWNER") {
+        finalAccountType = "VENUE_OWNER";
+      } else if (accountType === "PLAYER") {
+        finalAccountType = "PLAYER";
+      } else {
         return res.status(400).json({ message: "Invalid account type" });
       }
-      finalAccountType = accountType;
     }
 
     const user = await registerUser({

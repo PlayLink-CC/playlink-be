@@ -15,7 +15,9 @@ import express from "express";
 import {
   fetchAllVenues,
   fetchTopWeeklyVenues,
+  create,
 } from "../controllers/VenueController.js";
+import { authenticate, authorize } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -31,5 +33,12 @@ router.get("/", fetchAllVenues);
  * Public endpoint to get the top 4 most booked venues in the last 7 days
  */
 router.get("/top-weekly", fetchTopWeeklyVenues);
+
+/**
+ * POST /venues
+ * Protected endpoint to create a new venue
+ * Only VENUE_OWNER can create a venue
+ */
+router.post("/", authenticate, authorize(["VENUE_OWNER"]), create);
 
 export default router;

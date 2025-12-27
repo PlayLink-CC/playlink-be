@@ -17,6 +17,7 @@ import {
   getAllVenues,
   findMostBookedVenuesThisWeek,
   searchVenues,
+  createVenue,
 } from "../services/VenueService.js";
 
 /**
@@ -75,6 +76,30 @@ export const fetchTopWeeklyVenues = async (req, res) => {
     res.json(venues);
   } catch (err) {
     console.error("Error fetching top weekly venues:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Create a new venue
+ *
+ * @async
+ * @route POST /api/venues
+ * @access Protected (Venue Owner)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Object} Created venue object
+ * @returns {number} res.status - 201 on success, 500 on error
+ */
+export const create = async (req, res) => {
+  try {
+    const ownerId = req.user.id; // From auth middleware
+    const venueData = { ...req.body, ownerId };
+
+    const result = await createVenue(venueData);
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("Error creating venue:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

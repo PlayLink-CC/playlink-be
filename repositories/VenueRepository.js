@@ -40,7 +40,7 @@ import connectDB from "../config/dbconnection.js";
  * @throws {Error} Database connection error
  */
 export const findAllVenues = async () => {
-  const sql = `
+    const sql = `
     SELECT 
         v.venue_id,
         v.name AS venue_name,
@@ -71,8 +71,8 @@ export const findAllVenues = async () => {
         v.description
   `;
 
-  const [rows] = await connectDB.execute(sql);
-  return rows;
+    const [rows] = await connectDB.execute(sql);
+    return rows;
 };
 
 /**
@@ -97,7 +97,7 @@ export const findAllVenues = async () => {
  * @throws {Error} Database connection error
  */
 export const findMostBookedVenuesThisWeek = async () => {
-  const sql = `
+    const sql = `
     SELECT 
         v.venue_id,
         v.name AS venue_name,
@@ -138,8 +138,8 @@ export const findMostBookedVenuesThisWeek = async () => {
     LIMIT 4;
   `;
 
-  const [rows] = await connectDB.execute(sql);
-  return rows;
+    const [rows] = await connectDB.execute(sql);
+    return rows;
 };
 
 /**
@@ -166,7 +166,7 @@ export const findMostBookedVenuesThisWeek = async () => {
  * @throws {Error} Database connection error
  */
 export const findVenuesBySearch = async (searchText) => {
-  const sql = `
+    const sql = `
     SELECT 
         v.venue_id,
         v.name AS venue_name,
@@ -201,12 +201,107 @@ export const findVenuesBySearch = async (searchText) => {
         v.description
   `;
 
-  const searchPattern = `%${searchText}%`;
-  const [rows] = await connectDB.execute(sql, [
-    searchPattern,
-    searchPattern,
-    searchPattern,
-    searchPattern,
-  ]);
-  return rows;
+    const searchPattern = `%${searchText}%`;
+    const [rows] = await connectDB.execute(sql, [
+        searchPattern,
+        searchPattern,
+        searchPattern,
+        searchPattern,
+    ]);
+    return rows;
+};
+
+/**
+ * Create a new venue with all associated details
+ *
+ * wraps inserts in a transaction.
+ *
+ * @async
+ * @param {Object} venueData
+ * @param {number} venueData.ownerId
+ * @param {string} venueData.name
+ * @param {string} venueData.description
+ * @param {string} venueData.address
+ * @param {string} venueData.city
+ * @param {number} venueData.pricePerHour
+ * @param {number} venueData.cancellationPolicyId
+ * @param {number[]} venueData.sportIds
+ * @param {number[]} venueData.amenityIds
+ * @param {string[]} venueData.imageUrls
+ * @returns {Promise<number>} New venue ID
+ */
+export const createVenue = async (venueData) => {
+    const conn = await connectDB.getConnection();
+    try {
+        await conn.beginTransaction();
+
+        const {
+            ownerId,
+            name,
+            description,
+            address,
+            city,
+            pricePerHour,
+            cancellationPolicyId,
+            sportIds,
+            amenityIds,
+            imageUrls,
+        } = venueData;
+
+        // 1. Insert Venue
+        const [result] = await conn.execute(
+            `INSERT INTO venues (owner_id, name, description, address, city, price_per_hour, cancellation_policy_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+                ownerId,
+                name,
+                description,
+                address,
+                city,
+                pricePerHour,
+                cancellationPolicyId,
+            ]
+        );
+        const venueId = result.insertId;
+
+        // 2. Insert Sports
+        if (sportIds && sportIds.length > 0) {
+            const sportValues = sportIds.map((id) => [venueId, id]);
+            await conn.query(
+                `INSERT INTO venue_sports (venue_id, sport_id) VALUES ?`,
+                [sportValues]
+            );
+        }
+
+        // 3. Insert Amenities
+        if (amenityIds && amenityIds.length > 0) {
+            const amenityValues = amenityIds.map((id) => [venueId, id]);
+            await conn.query(
+                `INSERT INTO venue_amenities (venue_id, amenity_id) VALUES ?`,
+                [amenityValues]
+            );
+        }
+
+        // 4. Insert Images
+        if (imageUrls && imageUrls.length > 0) {
+            const imageValues = imageUrls.map((url, index) => [
+                venueId,
+                url,
+                index === 0 ? 1 : 0,
+                index + 1,
+            ]);
+            await conn.query(
+                `INSERT INTO venue_images (venue_id, image_url, is_primary, sort_order) VALUES ?`,
+                [imageValues]
+            );
+        }
+
+        await conn.commit();
+        return venueId;
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally {
+        conn.release();
+    }
 };

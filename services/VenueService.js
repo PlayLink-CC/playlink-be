@@ -59,4 +59,24 @@ export const findMostBookedVenuesThisWeek = async () => {
 export const searchVenues = async (searchText) => {
   const venues = await venueRepository.findVenuesBySearch(searchText);
   return venues;
+  return venues;
+};
+
+/**
+ * Create a new venue
+ *
+ * Validates and passes data to repository.
+ *
+ * @async
+ * @param {Object} data - Venue data from controller
+ * @returns {Promise<Object>} Created venue details or ID
+ */
+export const createVenue = async (data) => {
+  const { name, ownerId, pricePerHour } = data;
+  if (!name || !ownerId || !pricePerHour) {
+    throw new Error("Missing required fields");
+  }
+
+  const venueId = await venueRepository.createVenue(data);
+  return { venueId, ...data };
 };
