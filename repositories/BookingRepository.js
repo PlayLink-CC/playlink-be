@@ -237,6 +237,58 @@ export const getBookingWithVenue = async (conn, bookingId) => {
 };
 
 /**
+ * Get booking with cancellation policy details
+ *
+ * @async
+ * @param {number} bookingId
+ * @returns {Promise<Object|null>}
+ */
+export const getBookingWithPolicy = async (bookingId) => {
+  const [rows] = await pool.execute(
+    `SELECT b.*,
+            v.venue_id, v.owner_id,
+            cp.policy_id, cp.name as policy_name, cp.refund_percentage, cp.hours_before_start
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     LEFT JOIN cancellation_policies cp ON v.cancellation_policy_id = cp.policy_id
+     WHERE b.booking_id = ?`,
+    [bookingId]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Update booking cancellation status and time
+ * 
+ * @async
+ * @param {Object} conn
+ * @param {number} bookingId 
+ * @param {string} cancellationTime
+ */
+export const updateBookingCancellation = async (conn, bookingId, cancellationTime) => {
+  await conn.execute(
+    "UPDATE bookings SET status = 'CANCELLED', cancellation_time = ? WHERE booking_id = ?",
+    [cancellationTime, bookingId]
+  );
+};
+
+/**
+ * Update booking dates (Reschedule)
+ * 
+ * @async
+ * @param {Object} conn
+ * @param {number} bookingId
+ * @param {string} start
+ * @param {string} end
+ */
+export const updateBookingDates = async (conn, bookingId, start, end) => {
+  await conn.execute(
+    "UPDATE bookings SET booking_start = ?, booking_end = ? WHERE booking_id = ?",
+    [start, end, bookingId]
+  );
+};
+
+/**
  * Get all bookings for a user
  *
  * Fetches all bookings where user is a participant, with venue details.
@@ -270,12 +322,15 @@ export const getUserBookings = async (userId) => {
        v.name   AS venue_name,
        v.city   AS venue_city,
        v.address AS venue_address,
+       cp.refund_percentage,
+       cp.hours_before_start,
        bp.share_amount,
        bp.payment_status,
        bp.is_initiator
      FROM booking_participants bp
      JOIN bookings b ON b.booking_id = bp.booking_id
      JOIN venues   v ON v.venue_id  = b.venue_id
+     LEFT JOIN cancellation_policies cp ON v.cancellation_policy_id = cp.policy_id
      WHERE bp.user_id = ?
      ORDER BY b.booking_start DESC`,
     [userId]

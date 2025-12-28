@@ -9,6 +9,7 @@ import {
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as WalletRepository from "../repositories/WalletRepository.js";
 import * as SplitPaymentService from "../services/SplitPaymentService.js";
+import * as BookingService from "../services/BookingService.js";
 import { calculateDynamicPrice } from "../services/VenueService.js";
 
 /**
@@ -535,3 +536,37 @@ export const getOwnerBookings = async (req, res) => {
   }
 };
 
+
+export const cancelBooking = async (req, res) => {
+  const bookingId = Number(req.params.id);
+  const userId = req.user.id; // Corrected: req.user.id from middleware
+
+  console.log(`[CancelBooking] Request received for BookingID: ${bookingId}, UserID: ${userId}`);
+
+  try {
+    const result = await BookingService.cancelBooking(bookingId, userId);
+    console.log(`[CancelBooking] Success`);
+    return res.json(result);
+  } catch (err) {
+    console.error("[CancelBooking] Error:", err);
+    return res.status(400).json({ message: err.message });
+  }
+};
+
+export const rescheduleBooking = async (req, res) => {
+  const bookingId = Number(req.params.id);
+  const userId = req.user.id;
+  const { date, time, hours } = req.body;
+
+  if (!date || !time || !hours) {
+    return res.status(400).json({ message: "Date, time, and hours are required" });
+  }
+
+  try {
+    const result = await BookingService.rescheduleBooking(bookingId, userId, date, time, hours);
+    return res.json(result);
+  } catch (err) {
+    console.error("Reschedule Error:", err);
+    return res.status(400).json({ message: err.message });
+  }
+};
