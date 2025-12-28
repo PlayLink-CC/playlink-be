@@ -110,6 +110,8 @@ export const createCheckoutSession = async (req, res) => {
             bookingEnd,
             totalAmount,
             cancellationPolicyId: venue.cancellation_policy_id,
+            pointsUsed: totalAmount, // Full points payment
+            paidAmount: 0 // No cash/card paid
           });
 
           // Add Initiator (PAID)

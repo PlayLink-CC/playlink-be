@@ -555,3 +555,19 @@ export const getBookingParticipant = async (conn, bookingId, userId) => {
   );
   return rows[0] || null;
 };
+
+/**
+ * Get all participants for a booking
+ * 
+ * @param {number} bookingId 
+ * @returns {Promise<Array>} List of participants with share and status
+ */
+export const getBookingParticipants = async (bookingId) => {
+  const [rows] = await pool.execute(
+    `SELECT user_id, share_amount, is_initiator, payment_status 
+     FROM booking_participants 
+     WHERE booking_id = ?`,
+    [bookingId]
+  );
+  return rows;
+};

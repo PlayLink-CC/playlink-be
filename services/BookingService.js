@@ -63,37 +63,53 @@ export const cancelBooking = async (bookingId, userId) => {
         const cancelTime = toMySQLDateTime(now);
         await BookingRepository.updateBookingCancellation(conn, bookingId, cancelTime);
 
-        // 2. Refund to Wallet (Initiator)
-        if (refundAmount > 0) {
-            await WalletRepository.updateWalletBalance(conn, userId, refundAmount);
+        // 2. Distribute Refunds
+        const participants = await BookingRepository.getBookingParticipants(bookingId);
+        let totalRefundPool = refundAmount; // Total amount to be refunded
+        let othersRefundTotal = 0;
+
+        for (const p of participants) {
+            // Refund non-initiators who have PAID
+            if (!p.is_initiator && p.payment_status === 'PAID') {
+                const pRefund = Number(p.share_amount) * (hoursRemaining > policyHours ? 1 : Number(refundPct) / 100);
+
+                await WalletRepository.updateWalletBalance(conn, p.user_id, pRefund);
+                await WalletRepository.createTransaction(conn, {
+                    userId: p.user_id,
+                    amount: pRefund,
+                    type: 'CREDIT',
+                    description: `Refund for Booking #${bookingId} (${hoursRemaining > policyHours ? '100' : refundPct}% policy)`,
+                    referenceType: 'REFUND',
+                    referenceId: bookingId
+                });
+
+                othersRefundTotal += pRefund;
+            }
+        }
+
+        // 3. Final Initiator Credit (Remainder of the pool)
+        // If initiator didn't pay (impossible for CONFIRMED?), this logic still gives them the remainder?
+        // Assumption: Initiator paid the bulk or covered initial cost.
+        // If totalRefundPool is 0, initiatorRefund is 0.
+        // If others took all refund (unlikely), initiatorRefund is 0.
+        const initiatorRefund = totalRefundPool - othersRefundTotal;
+
+        if (initiatorRefund > 0) {
+            await WalletRepository.updateWalletBalance(conn, userId, initiatorRefund);
             await WalletRepository.createTransaction(conn, {
                 userId,
-                amount: refundAmount,
+                amount: initiatorRefund,
                 type: 'CREDIT',
-                description: `Refund for Booking #${bookingId} (${refundPct}% policy)`,
+                description: `Refund for Booking #${bookingId} (Initiator Share)`,
                 referenceType: 'REFUND',
                 referenceId: bookingId
             });
         }
 
-        // 3. Update Participants / Payments Status
-        // Mark all participants (including initiator) as REFUNDED or CANCELLED?
-        // If refund > 0, status 'REFUNDED', else 'CANCELLED' (for clarity)?
-        // The requirement says: "Update booking_participants and payments statuses to REFUNDED or CANCELLED."
+        // 4. Update Participants / Payments Status
         const status = refundAmount > 0 ? 'REFUNDED' : 'CANCELLED';
-
         await BookingRepository.updateParticipantsPaymentStatus(conn, bookingId, status);
-
-        // Also update payments table?
-        // Payment status usually tracks 'PENDING', 'SUCCEEDED', 'FAILED'. 'REFUNDED' is a valid state.
-        // We'll update all successful payments for this booking to REFUNDED.
-        // However, we don't have a direct method for bulk update payments by bookingId in repo yet.
-        // Let's optimize: We can iterate or add a repo method.
-        // For simplicity, let's assume updateParticipantsPaymentStatus covers the user-facing status.
-        // But the payments table might need update too if we track financial records strictly.
-        // Use raw query for now or add repo method if needed. 
-        // Let's add inline query for payments table update safely
-        await conn.execute("UPDATE payments SET status = ? WHERE booking_id = ?", [status, bookingId]);
+        await conn.execute("UPDATE payments SET status = ? WHERE booking_id = ? AND status = 'SUCCEEDED'", ['REFUNDED', bookingId]);
 
         await conn.commit();
 
@@ -101,8 +117,8 @@ export const cancelBooking = async (bookingId, userId) => {
             success: true,
             refundAmount,
             message: refundAmount > 0
-                ? `Booking cancelled. ${refundAmount.toFixed(2)} Playlink points refunded.`
-                : "Booking cancelled. No refund applicable based on policy."
+                ? `Booking cancelled. Refunds processed to wallets.`
+                : "Booking cancelled. No refund applicable."
         };
 
     } catch (err) {
