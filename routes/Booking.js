@@ -6,6 +6,7 @@ import {
   getMyBookings,
   getBookedSlots,
   getOwnerBookings,
+  paySplitShare,
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -13,6 +14,7 @@ const router = express.Router();
 // Stripe checkout
 router.post("/checkout-session", authMiddleware, createCheckoutSession);
 router.get("/checkout-success", authMiddleware, handleCheckoutSuccess);
+router.post("/pay-split-share", authMiddleware, paySplitShare);
 
 router.get("/my", authMiddleware, getMyBookings);
 router.get("/owner", authMiddleware, getOwnerBookings);

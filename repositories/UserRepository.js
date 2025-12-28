@@ -107,3 +107,41 @@ export const createUser = async ({
 
   return rows[0];
 };
+
+/**
+ * Search users by name or email
+ * 
+ * @async
+ * @param {string} query 
+ * @returns {Promise<Object[]>}
+ */
+export const searchUsers = async (query) => {
+  const searchTerm = `%${query}%`;
+  const sql = `
+    SELECT user_id, full_name, email 
+    FROM users 
+    WHERE (full_name LIKE ? OR email LIKE ?)
+    AND account_type = 'PLAYER' -- Only invite players
+    LIMIT 10
+  `;
+  const [rows] = await connectDB.execute(sql, [searchTerm, searchTerm]);
+  return rows;
+};
+
+/**
+ * Find User IDs by Emails
+ * 
+ * @async
+ * @param {string[]} emails 
+ * @returns {Promise<Object[]>} Array of objects {user_id, email}
+ */
+export const findIdsByEmails = async (emails) => {
+  if (emails.length === 0) return [];
+
+  // Create placeholders ?,?,?
+  const placeholders = emails.map(() => '?').join(',');
+  const sql = `SELECT user_id, email FROM users WHERE email IN (${placeholders})`;
+
+  const [rows] = await connectDB.execute(sql, emails);
+  return rows;
+};

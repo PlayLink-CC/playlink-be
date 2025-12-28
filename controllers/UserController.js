@@ -14,6 +14,7 @@
  */
 
 import { getUsers, logInUser, registerUser } from "../services/UserService.js";
+import { searchUsers as findUsers } from "../repositories/UserRepository.js";
 import { createToken, verifyToken } from "../utils/authUtil.js";
 
 /**
@@ -220,3 +221,25 @@ export const logout = (req, res) => {
 
   return res.json({ message: "Logged out" });
 };
+
+/**
+ * Search users
+ * 
+ * @async
+ * @route GET /api/users/search?query=...
+ */
+export const search = async (req, res) => {
+  const { query } = req.query;
+  if (!query || query.length < 2) {
+    return res.status(400).json({ message: "Query too short" });
+  }
+
+  try {
+    const users = await findUsers(query);
+    return res.json({ users });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+

@@ -476,3 +476,23 @@ export const hasUserCompletedBooking = async (userId, venueId) => {
 export const getPool = () => {
   return pool;
 };
+
+/**
+ * Get a booking participant record
+ *
+ * Checks if a user is already a participant in a booking.
+ * Should be called within a transaction if lock is needed, but here we just read.
+ *
+ * @async
+ * @param {Object} conn - Database connection
+ * @param {number} bookingId - Booking ID
+ * @param {number} userId - User ID
+ * @returns {Promise<Object|null>} Participant record or null
+ */
+export const getBookingParticipant = async (conn, bookingId, userId) => {
+  const [rows] = await conn.execute(
+    "SELECT * FROM booking_participants WHERE booking_id = ? AND user_id = ?",
+    [bookingId, userId]
+  );
+  return rows[0] || null;
+};
