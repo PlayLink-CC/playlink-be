@@ -130,3 +130,54 @@ export const createTransaction = async (conn, {
     [walletId, amount, type, referenceType, referenceId, description]
   );
 };
+
+/**
+ * Get rich transaction history for a user
+ * 
+ * Joins wallet transactions with bookings, venues, and users (for split payments).
+ * 
+ * @async
+ * @param {number} userId 
+ * @returns {Promise<Object[]>}
+ */
+export const getTransactionsWithDetails = async (userId) => {
+  // 1. Get wallet_id
+  const [wRows] = await pool.execute("SELECT wallet_id FROM wallets WHERE user_id = ?", [userId]);
+  if (wRows.length === 0) return [];
+  const walletId = wRows[0].wallet_id;
+
+  // 2. Fetch Transactions with Joins
+  // We left join bookings and venues to get context for BOOKING_PAYMENT and BOOKING_REIMBURSEMENT.
+  // For Payer Name in Reimbursements, we might need to look at who triggered it?
+  // Current schema doesn't link transaction -> payer directly. 
+  // We can try to get context from description or generic booking info.
+  // However, request asked for "From: [User Name]".
+  // Since we can't reliably join a specific "Payer" from the transaction log (only booking_id),
+  // we will suffice with Booking/Venue details and relying on Description if we enhanced it,
+  // OR we can query the 'booking_participants' who are PAID and NOT initiator for that booking?
+  // But that gives ALL payers. If I received 3 reimbursements, I have 3 transactions? Yes.
+  // But they all point to same booking_id.
+  // Limitation: We can't map 1-to-1 transaction to participant without 'related_user_id'.
+  // Workaround: We will return the venue details and let frontend format "Split Reimbursement".
+
+  const sql = `
+    SELECT 
+      wt.transaction_id,
+      wt.amount,
+      wt.direction,
+      wt.transaction_type,
+      wt.description,
+      wt.created_at,
+      b.booking_id,
+      v.name AS venue_name,
+      v.city AS venue_city
+    FROM wallet_transactions wt
+    LEFT JOIN bookings b ON wt.booking_id = b.booking_id
+    LEFT JOIN venues v ON b.venue_id = v.venue_id
+    WHERE wt.wallet_id = ?
+    ORDER BY wt.created_at DESC
+  `;
+
+  const [rows] = await pool.execute(sql, [walletId]);
+  return rows;
+};

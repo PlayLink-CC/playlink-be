@@ -135,12 +135,16 @@ export const executeReimbursement = async (participantUserId, bookingId, amountP
         // 3. Credit Initiator Wallet
         await WalletRepository.updateWalletBalance(conn, initiatorId, amountPaid);
 
+        // Fetch Payer Name for Description
+        const [payerRows] = await conn.execute("SELECT full_name FROM users WHERE user_id = ?", [participantUserId]);
+        const payerName = payerRows[0] ? payerRows[0].full_name : "Participant";
+
         // 4. Record Transaction for Initiator (Credit from Split)
         await WalletRepository.createTransaction(conn, {
             userId: initiatorId,
             amount: amountPaid,
             type: "CREDIT",
-            description: `Reimbursement for Booking #${bookingId}`,
+            description: `Reimbursement from ${payerName} (Booking #${bookingId})`,
             referenceType: "BOOKING_REIMBURSEMENT",
             referenceId: bookingId
         });
