@@ -57,12 +57,23 @@ export const updateWalletBalance = async (conn, userId, amount) => {
     // If debiting, check balance first to prevent negative
     if (amount < 0) {
       const [rows] = await conn.execute(
-        "SELECT balance FROM wallets WHERE user_id = ?",
+        "SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE",
         [userId]
       );
+
+      // DEBUG: Write to file
+      const fs = await import('fs');
+      try {
+        const rowData = rows.length > 0 ? JSON.stringify(rows[0]) : "NO ROWS";
+        fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] WalletRepo Check - User: ${userId}, Rows: ${rowData}\n`);
+      } catch (e) { console.error("Log fail", e); }
+
       const currentBalance = Number(rows[0].balance);
-      if (currentBalance + amount < 0) {
-        throw new Error("Insufficient funds");
+
+      // Floating point safe check (allow -0.01 epsilon)
+      if (currentBalance + amount < -0.01) {
+        console.error(`Insufficient funds: Balance=${currentBalance}, Amount=${amount}, Result=${currentBalance + amount}`);
+        throw new Error(`Insufficient funds: Balance ${currentBalance} < Required ${Math.abs(amount)}`);
       }
     }
 

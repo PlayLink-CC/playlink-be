@@ -190,7 +190,9 @@ export const createCheckoutSession = async (req, res) => {
         cancellation_policy_id: String(venue.cancellation_policy_id),
         invites: JSON.stringify(invites), // Store invites in metadata
         share_amount: String(shareAmount),
-        points_to_deduct: String(pointsToDeduct)
+        points_to_deduct: String(pointsToDeduct),
+        points_used: String(pointsToDeduct),
+        paid_amount: String(amountToCharge)
       },
       success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
@@ -234,6 +236,14 @@ export const handleCheckoutSuccess = async (req, res) => {
       invites, share_amount, points_to_deduct,
       type, booking_id // for share payment
     } = session.metadata;
+
+    console.log(`[CheckoutSuccess] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}, Type: ${type}`);
+
+    // DEBUG: Write to file
+    const fs = await import('fs');
+    try {
+      fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}\n`);
+    } catch (e) { console.error("Log fail", e); }
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
@@ -285,22 +295,9 @@ export const handleCheckoutSuccess = async (req, res) => {
         return res.status(409).json({ message: "Slot booked by another user. Contact support." });
       }
 
-      // Deduct Points (if partial payment was used)
-      if (points > 0) {
-        const currentBalance = await WalletRepository.getWalletBalance(user_id);
-        if (currentBalance >= points) {
-          await WalletRepository.updateWalletBalance(conn, user_id, -points);
-          await WalletRepository.createTransaction(conn, {
-            userId: user_id,
-            amount: -points,
-            type: "DEBIT",
-            description: "Booking payment (Partial Points)",
-            referenceType: "BOOKING_PARTIAL_POINTS"
-          });
-        }
-        // If balance insufficient now, we proceed but log warning/error? 
-        // For now assume user hasn't spent them elsewhere in same second.
-      }
+
+
+      const paidAmount = Number(total_amount) - points;
 
       // Create Booking
       const bookingId = await BookingRepository.createBooking(conn, {
@@ -310,7 +307,17 @@ export const handleCheckoutSuccess = async (req, res) => {
         bookingEnd: booking_end,
         totalAmount: Number(total_amount),
         cancellationPolicyId: cancellation_policy_id,
+        pointsUsed: points,
+        paidAmount: paidAmount
       });
+
+      // Update Transaction Reference if points used
+      if (points > 0) {
+        // Re-log or update transaction? 
+        // Since we already inserted, we can't easily update referenceId without ID.
+        // Better to move Deduction AFTER booking creation but BEFORE commit.
+        // Let's move deduction down.
+      }
 
       // Add Initiator
       await BookingRepository.addBookingParticipant(conn, {
@@ -319,6 +326,21 @@ export const handleCheckoutSuccess = async (req, res) => {
         shareAmount: Number(share_amount),
         isInitiator: 1
       });
+
+      // Deduct Points Logic moved here to have bookingId
+      if (points > 0) {
+        await WalletRepository.updateWalletBalance(conn, user_id, -points);
+        // Schema: transaction_id, wallet_id, booking_id, transaction_type, direction, amount, description, created_at
+        // createTransaction maps input to this schema
+        await WalletRepository.createTransaction(conn, {
+          userId: user_id,
+          amount: -points,
+          type: "DEBIT", // -> direction
+          description: "Booking payment (Points)",
+          referenceType: "BOOKING_PAYMENT", // -> transaction_type
+          referenceId: bookingId // -> booking_id
+        });
+      }
 
       // Setup Invitees
       // Pass 'conn' to reuse transaction (prevents lock wait timeout)
@@ -355,7 +377,7 @@ export const handleCheckoutSuccess = async (req, res) => {
     }
   } catch (err) {
     console.error("Error confirming checkout", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error: " + err.message });
   }
 };
 

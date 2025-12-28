@@ -64,12 +64,14 @@ export const createBooking = async (conn, {
   bookingEnd,
   totalAmount,
   cancellationPolicyId,
+  pointsUsed = 0,
+  paidAmount = 0
 }) => {
   const [result] = await conn.execute(
     `INSERT INTO bookings
-     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId]
+     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, points_used, paid_amount)
+     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
+    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, pointsUsed || 0, paidAmount || 0]
   );
 
   return result.insertId;
@@ -263,6 +265,8 @@ export const getUserBookings = async (userId) => {
        b.booking_end,
        b.total_amount,
        b.status,
+       b.points_used,
+       b.paid_amount,
        v.name   AS venue_name,
        v.city   AS venue_city,
        v.address AS venue_address,
