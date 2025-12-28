@@ -1,5 +1,6 @@
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as WalletRepository from "../repositories/WalletRepository.js";
+import * as DateUtil from "../utils/dateUtil.js";
 import { toMySQLDateTime } from "../utils/dateUtil.js";
 
 /**
@@ -39,7 +40,15 @@ export const cancelBooking = async (bookingId, userId) => {
     const policyHours = booking.hours_before_start || 0; // Default 0 if no policy
     const refundPct = booking.refund_percentage || 0;
 
-    if (hoursRemaining >= policyHours) {
+    if (hoursRemaining <= 0) {
+        throw new Error("Cannot cancel a booking that has already started.");
+    }
+
+    if (hoursRemaining > policyHours) {
+        // Full Refund (Tier 1)
+        refundAmount = Number(booking.total_amount);
+    } else {
+        // Reduced Refund (Tier 2) - e.g. 90%
         refundAmount = Number(booking.total_amount) * (Number(refundPct) / 100);
     }
 
@@ -121,6 +130,23 @@ export const rescheduleBooking = async (bookingId, userId, newDate, newTime, hou
 
     const start = new Date(`${newDate}T${newTime}:00`);
     const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
+
+    // Basic Time Validations
+    if (!start) throw new Error("Invalid date or time");
+
+    // Check operating hours (7am-10pm) etc.
+    // Re-use `getTimeValidationError` logic but we have separate params here.
+    // We can call the helper functions directly:
+    if (!DateUtil.isValid15MinInterval(newTime)) {
+        throw new Error("Times must be in 15-minute intervals");
+    }
+    if (!DateUtil.isWithinBookingWindow(newTime)) {
+        throw new Error("Booking must start between 7:00 AM and 10:00 PM");
+    }
+    if (!DateUtil.doesBookingFitInWindow(newTime, hours)) {
+        throw new Error("Booking must end by 10:00 PM");
+    }
+
     const now = new Date();
 
     if (start <= now) throw new Error("New time must be in the future");
