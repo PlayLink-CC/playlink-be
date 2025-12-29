@@ -142,3 +142,10 @@ export const getVenueById = async (venueId) => {
   }
   return venue;
 };
+
+/**
+ * Delete a venue
+ */
+export const deleteVenue = async (venueId) => {
+  return await venueRepository.deleteVenue(venueId);
+};

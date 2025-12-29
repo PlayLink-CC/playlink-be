@@ -441,3 +441,25 @@ export const findVenueById = async (venueId) => {
     const [rows] = await connectDB.execute(sql, [venueId]);
     return rows[0];
 };
+
+/**
+ * Delete a venue by ID
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<boolean>} True if deleted
+ */
+export const deleteVenue = async (venueId) => {
+    // We can either do soft delete or hard delete.
+    // Given the foreign key constraints likely exist (bookings, images, sports), hard delete might fail if not cascaded.
+    // However, usually soft delete 'is_active = 0' is safer for business logic.
+    // Or we try DELETE and rely on CASCADE if set. 
+    // Checking the user request: "only deletes the venues".
+    // I will try DELETE first. If it fails, I might need to delete dependencies.
+    // Actually, looking at CREATE, we insert separately. 
+    // Let's implement DELETE. If schema has ON DELETE CASCADE, it works.
+
+    // Better safely: DELETE FROM venues WHERE venue_id = ?
+    const [result] = await connectDB.execute("DELETE FROM venues WHERE venue_id = ?", [venueId]);
+    return result.affectedRows > 0;
+};

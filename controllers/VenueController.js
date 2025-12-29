@@ -22,6 +22,7 @@ import {
   blockVenueSlot,
   getVenuesByOwner,
   getVenueById,
+  deleteVenue,
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
@@ -241,6 +242,39 @@ export const fetchVenueById = async (req, res) => {
     console.error("Error fetching venue by ID:", err);
     if (err.message === "Venue not found") {
       return res.status(404).json({ message: "Venue not found" });
+    }
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Delete a venue
+ * DELETE /api/venues/:id
+ */
+export const remove = async (req, res) => {
+  const { id } = req.params;
+  const ownerId = req.user.id;
+
+  try {
+    // Optional: Verify ownership before delete (Service might do it, or we check here)
+    const venue = await VenueRepository.findVenueById(id);
+    if (!venue) {
+      return res.status(404).json({ message: "Venue not found" });
+    }
+    if (venue.owner_id !== ownerId) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const success = await VenueRepository.deleteVenue(id);
+    if (!success) {
+      return res.status(404).json({ message: "Venue not found or could not be deleted" });
+    }
+    res.json({ message: "Venue deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting venue:", err);
+    // Handle FK violations (e.g. existing bookings)
+    if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(400).json({ message: "Cannot delete venue with existing bookings or data." });
     }
     res.status(500).json({ message: "Server error" });
   }
