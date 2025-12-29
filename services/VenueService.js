@@ -74,7 +74,7 @@ export const searchVenues = async (searchText) => {
  */
 export const createVenue = async (data) => {
   const { name, ownerId, pricePerHour } = data;
-  if (!name || !ownerId || !pricePerHour) {
+  if (!name || !name.trim() || !ownerId || !pricePerHour) {
     throw new Error("Missing required fields");
   }
 
@@ -86,6 +86,9 @@ export const createVenue = async (data) => {
  * Update venue details
  */
 export const updateVenue = async (venueId, updates) => {
+  if (updates.name !== undefined && (!updates.name || !updates.name.trim())) {
+    throw new Error("Venue name cannot be empty");
+  }
   return await venueRepository.updateVenue(venueId, updates);
 };
 
