@@ -14,6 +14,7 @@
  */
 
 import { getUsers, logInUser, registerUser } from "../services/UserService.js";
+import { searchUsers as findUsers } from "../repositories/UserRepository.js";
 import { createToken, verifyToken } from "../utils/authUtil.js";
 
 /**
@@ -73,14 +74,19 @@ export const register = async (req, res) => {
         .json({ message: "Password must be at least 8 characters long" });
     }
 
-    // Default to USER, but allow VENUE_OWNER if specified
-    let finalAccountType = "USER";
+    // Default to PLAYER (standard user), but allow VENUE_OWNER if specified
+    let finalAccountType = "PLAYER";
     if (accountType) {
-      const allowedTypes = ["USER", "VENUE_OWNER"];
-      if (!allowedTypes.includes(accountType)) {
+      // Map 'USER' to 'PLAYER' for frontend compatibility if needed, or just accept PLAYER/VENUE_OWNER
+      if (accountType === "USER") {
+        finalAccountType = "PLAYER";
+      } else if (accountType === "VENUE_OWNER") {
+        finalAccountType = "VENUE_OWNER";
+      } else if (accountType === "PLAYER") {
+        finalAccountType = "PLAYER";
+      } else {
         return res.status(400).json({ message: "Invalid account type" });
       }
-      finalAccountType = accountType;
     }
 
     const user = await registerUser({
@@ -215,3 +221,25 @@ export const logout = (req, res) => {
 
   return res.json({ message: "Logged out" });
 };
+
+/**
+ * Search users
+ * 
+ * @async
+ * @route GET /api/users/search?query=...
+ */
+export const search = async (req, res) => {
+  const { query } = req.query;
+  if (!query || query.length < 2) {
+    return res.status(400).json({ message: "Query too short" });
+  }
+
+  try {
+    const users = await findUsers(query);
+    return res.json({ users });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+

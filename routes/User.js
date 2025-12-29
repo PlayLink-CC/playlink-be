@@ -23,6 +23,7 @@ import {
   authenticateUser,
   logout,
   register,
+  search,
 } from "../controllers/UserController.js";
 import { authenticate as authMiddleware, authorize } from "../middleware/auth.js";
 
@@ -60,6 +61,12 @@ router.get("/me", authMiddleware, (req, res) => {
   // req.user is the payload from the token
   res.json({ user: req.user });
 });
+
+/**
+ * GET /users/search?query=...
+ * Protected endpoint to search users
+ */
+router.get("/search", authMiddleware, search);
 
 /**
  * GET /users

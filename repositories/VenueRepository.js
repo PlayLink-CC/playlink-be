@@ -40,7 +40,7 @@ import connectDB from "../config/dbconnection.js";
  * @throws {Error} Database connection error
  */
 export const findAllVenues = async () => {
-  const sql = `
+    const sql = `
     SELECT 
         v.venue_id,
         v.name AS venue_name,
@@ -71,8 +71,8 @@ export const findAllVenues = async () => {
         v.description
   `;
 
-  const [rows] = await connectDB.execute(sql);
-  return rows;
+    const [rows] = await connectDB.execute(sql);
+    return rows;
 };
 
 /**
@@ -97,7 +97,7 @@ export const findAllVenues = async () => {
  * @throws {Error} Database connection error
  */
 export const findMostBookedVenuesThisWeek = async () => {
-  const sql = `
+    const sql = `
     SELECT 
         v.venue_id,
         v.name AS venue_name,
@@ -138,8 +138,8 @@ export const findMostBookedVenuesThisWeek = async () => {
     LIMIT 4;
   `;
 
-  const [rows] = await connectDB.execute(sql);
-  return rows;
+    const [rows] = await connectDB.execute(sql);
+    return rows;
 };
 
 /**
@@ -166,7 +166,7 @@ export const findMostBookedVenuesThisWeek = async () => {
  * @throws {Error} Database connection error
  */
 export const findVenuesBySearch = async (searchText) => {
-  const sql = `
+    const sql = `
     SELECT 
         v.venue_id,
         v.name AS venue_name,
@@ -201,12 +201,233 @@ export const findVenuesBySearch = async (searchText) => {
         v.description
   `;
 
-  const searchPattern = `%${searchText}%`;
-  const [rows] = await connectDB.execute(sql, [
-    searchPattern,
-    searchPattern,
-    searchPattern,
-    searchPattern,
-  ]);
-  return rows;
+    const searchPattern = `%${searchText}%`;
+    const [rows] = await connectDB.execute(sql, [
+        searchPattern,
+        searchPattern,
+        searchPattern,
+        searchPattern,
+    ]);
+    return rows;
+};
+
+/**
+ * Create a new venue with all associated details
+ *
+ * wraps inserts in a transaction.
+ *
+ * @async
+ * @param {Object} venueData
+ * @param {number} venueData.ownerId
+ * @param {string} venueData.name
+ * @param {string} venueData.description
+ * @param {string} venueData.address
+ * @param {string} venueData.city
+ * @param {number} venueData.pricePerHour
+ * @param {number} venueData.cancellationPolicyId
+ * @param {number[]} venueData.sportIds
+ * @param {number[]} venueData.amenityIds
+ * @param {string[]} venueData.imageUrls
+ * @returns {Promise<number>} New venue ID
+ */
+export const createVenue = async (venueData) => {
+    const conn = await connectDB.getConnection();
+    try {
+        await conn.beginTransaction();
+
+        const {
+            ownerId,
+            name,
+            description,
+            address,
+            city,
+            pricePerHour,
+            cancellationPolicyId,
+            sportIds,
+            amenityIds,
+            imageUrls,
+        } = venueData;
+
+        // 1. Insert Venue
+        const [result] = await conn.execute(
+            `INSERT INTO venues (owner_id, name, description, address, city, price_per_hour, cancellation_policy_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+                ownerId,
+                name,
+                description,
+                address,
+                city,
+                pricePerHour,
+                cancellationPolicyId,
+            ]
+        );
+        const venueId = result.insertId;
+
+        // 2. Insert Sports
+        if (sportIds && sportIds.length > 0) {
+            const sportValues = sportIds.map((id) => [venueId, id]);
+            await conn.query(
+                `INSERT INTO venue_sports (venue_id, sport_id) VALUES ?`,
+                [sportValues]
+            );
+        }
+
+        // 3. Insert Amenities
+        if (amenityIds && amenityIds.length > 0) {
+            const amenityValues = amenityIds.map((id) => [venueId, id]);
+            await conn.query(
+                `INSERT INTO venue_amenities (venue_id, amenity_id) VALUES ?`,
+                [amenityValues]
+            );
+        }
+
+        // 4. Insert Images
+        if (imageUrls && imageUrls.length > 0) {
+            const imageValues = imageUrls.map((url, index) => [
+                venueId,
+                url,
+                index === 0 ? 1 : 0,
+                index + 1,
+            ]);
+            await conn.query(
+                `INSERT INTO venue_images (venue_id, image_url, is_primary, sort_order) VALUES ?`,
+                [imageValues]
+            );
+        }
+
+        await conn.commit();
+        return venueId;
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally {
+        conn.release();
+    }
+};
+
+/**
+ * Create a new venue review
+ * 
+ * @async
+ * @param {Object} reviewData
+ * @returns {Promise<number>} New review ID
+ */
+export const createReview = async ({ venueId, userId, rating, comment }) => {
+    const [result] = await connectDB.execute(
+        `INSERT INTO reviews (venue_id, user_id, rating, comment) VALUES (?, ?, ?, ?)`,
+        [venueId, userId, rating, comment]
+    );
+    return result.insertId;
+};
+
+/**
+ * Update venue details
+ * 
+ * @async
+ * @param {number} venueId
+ * @param {Object} updates - Fields to update
+ * @returns {Promise<boolean>} True if updated
+ */
+export const updateVenue = async (venueId, updates) => {
+    const validFields = ['name', 'description', 'price_per_hour', 'address', 'city'];
+    const fieldsToUpdate = [];
+    const values = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+        if (validFields.includes(key)) {
+            fieldsToUpdate.push(`${key} = ?`);
+            values.push(value);
+        }
+    }
+
+    if (fieldsToUpdate.length === 0) return false;
+
+    // Add updated_at timestamp
+    fieldsToUpdate.push('updated_at = NOW()');
+    values.push(venueId);
+
+    const sql = `UPDATE venues SET ${fieldsToUpdate.join(', ')} WHERE venue_id = ?`;
+
+    const [result] = await connectDB.execute(sql, values);
+    return result.affectedRows > 0;
+};
+
+/**
+ * Find venues by owner ID
+ * 
+ * @async
+ * @param {number} ownerId
+ * @returns {Promise<Object[]>} Array of venues
+ */
+export const findVenuesByOwner = async (ownerId) => {
+    const sql = `
+        SELECT 
+            v.venue_id,
+            v.name AS venue_name,
+            v.address,
+            v.city,
+            v.price_per_hour,
+            v.is_active,
+            vi.image_url AS primary_image
+        FROM venues v
+        LEFT JOIN venue_images vi 
+            ON vi.venue_id = v.venue_id
+            AND vi.is_primary = 1
+        WHERE v.owner_id = ?
+        ORDER BY v.created_at DESC
+    `;
+    const [rows] = await connectDB.execute(sql, [ownerId]);
+    return rows;
+};
+
+/**
+ * Find a specific venue by ID
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<Object>} Venue object or null
+ */
+export const findVenueById = async (venueId) => {
+    const sql = `
+    SELECT 
+        v.venue_id,
+        v.name AS venue_name,
+        v.owner_id,
+        v.address,
+        v.city,
+        CONCAT_WS(', ', v.address, v.city) AS location,
+        GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
+        v.price_per_hour,
+        vi.image_url AS primary_image,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        v.description,
+        v.cancellation_policy_id
+    FROM venues v
+    LEFT JOIN venue_sports vs 
+        ON vs.venue_id = v.venue_id
+    LEFT JOIN sports s 
+        ON s.sport_id = vs.sport_id
+    LEFT JOIN venue_images vi 
+        ON vi.venue_id = v.venue_id
+        AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va 
+        ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a 
+        ON a.amenity_id = va.amenity_id
+    WHERE v.venue_id = ?
+    GROUP BY 
+        v.venue_id,
+        v.name,
+        v.owner_id,
+        v.address,
+        v.city,
+        location,
+        v.price_per_hour,
+        vi.image_url,
+        v.description,
+        v.cancellation_policy_id
+    `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows[0];
 };

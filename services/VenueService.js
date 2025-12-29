@@ -14,6 +14,7 @@
  */
 
 import * as venueRepository from "../repositories/VenueRepository.js";
+import * as BookingRepository from "../repositories/BookingRepository.js";
 
 /**
  * Retrieve all venues from the database
@@ -59,4 +60,85 @@ export const findMostBookedVenuesThisWeek = async () => {
 export const searchVenues = async (searchText) => {
   const venues = await venueRepository.findVenuesBySearch(searchText);
   return venues;
+  return venues;
+};
+
+/**
+ * Create a new venue
+ *
+ * Validates and passes data to repository.
+ *
+ * @async
+ * @param {Object} data - Venue data from controller
+ * @returns {Promise<Object>} Created venue details or ID
+ */
+export const createVenue = async (data) => {
+  const { name, ownerId, pricePerHour } = data;
+  if (!name || !ownerId || !pricePerHour) {
+    throw new Error("Missing required fields");
+  }
+
+  const venueId = await venueRepository.createVenue(data);
+  return { venueId, ...data };
+};
+
+/**
+ * Update venue details
+ */
+export const updateVenue = async (venueId, updates) => {
+  return await venueRepository.updateVenue(venueId, updates);
+};
+
+/**
+ * Block a venue slot
+ */
+export const blockVenueSlot = async (venueId, userId, start, end, reason) => {
+  return await BookingRepository.createBlock(venueId, userId, start, end, reason);
+};
+
+/**
+ * Calculate dynamic price based on rules
+ */
+export const calculateDynamicPrice = async (venue, date, time, hours) => {
+  // Base price
+  let total = Number(venue.price_per_hour) * Number(hours);
+
+  // Fetch rules
+  const rules = await BookingRepository.getPricingRules(venue.venue_id);
+
+  // Simple logic: check if booking time overlaps with rule
+  const bookingStartHour = parseInt(time.split(':')[0]);
+
+  let maxMultiplier = 1.0;
+
+  for (const rule of rules) {
+    const ruleStart = parseInt(rule.start_time.split(':')[0]);
+    const ruleEnd = parseInt(rule.end_time.split(':')[0]);
+
+    if (bookingStartHour >= ruleStart && bookingStartHour < ruleEnd) {
+      if (Number(rule.multiplier) > maxMultiplier) {
+        maxMultiplier = Number(rule.multiplier);
+      }
+    }
+  }
+
+  return total * maxMultiplier;
+};
+
+/**
+ * Get venues for a specific owner
+ */
+export const getVenuesByOwner = async (ownerId) => {
+  return await venueRepository.findVenuesByOwner(ownerId);
+};
+
+/**
+ * Get venue details by ID
+ */
+export const getVenueById = async (venueId) => {
+  const venue = await venueRepository.findVenueById(venueId);
+  if (!venue) {
+    throw new Error("Venue not found");
+  }
+  return venue;
 };

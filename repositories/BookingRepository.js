@@ -64,12 +64,14 @@ export const createBooking = async (conn, {
   bookingEnd,
   totalAmount,
   cancellationPolicyId,
+  pointsUsed = 0,
+  paidAmount = 0
 }) => {
   const [result] = await conn.execute(
     `INSERT INTO bookings
-     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId]
+     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, points_used, paid_amount)
+     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
+    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, pointsUsed || 0, paidAmount || 0]
   );
 
   return result.insertId;
@@ -235,6 +237,58 @@ export const getBookingWithVenue = async (conn, bookingId) => {
 };
 
 /**
+ * Get booking with cancellation policy details
+ *
+ * @async
+ * @param {number} bookingId
+ * @returns {Promise<Object|null>}
+ */
+export const getBookingWithPolicy = async (bookingId) => {
+  const [rows] = await pool.execute(
+    `SELECT b.*,
+            v.venue_id, v.owner_id,
+            cp.policy_id, cp.name as policy_name, cp.refund_percentage, cp.hours_before_start
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     LEFT JOIN cancellation_policies cp ON v.cancellation_policy_id = cp.policy_id
+     WHERE b.booking_id = ?`,
+    [bookingId]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Update booking cancellation status and time
+ * 
+ * @async
+ * @param {Object} conn
+ * @param {number} bookingId 
+ * @param {string} cancellationTime
+ */
+export const updateBookingCancellation = async (conn, bookingId, cancellationTime) => {
+  await conn.execute(
+    "UPDATE bookings SET status = 'CANCELLED', cancellation_time = ? WHERE booking_id = ?",
+    [cancellationTime, bookingId]
+  );
+};
+
+/**
+ * Update booking dates (Reschedule)
+ * 
+ * @async
+ * @param {Object} conn
+ * @param {number} bookingId
+ * @param {string} start
+ * @param {string} end
+ */
+export const updateBookingDates = async (conn, bookingId, start, end) => {
+  await conn.execute(
+    "UPDATE bookings SET booking_start = ?, booking_end = ? WHERE booking_id = ?",
+    [start, end, bookingId]
+  );
+};
+
+/**
  * Get all bookings for a user
  *
  * Fetches all bookings where user is a participant, with venue details.
@@ -263,20 +317,40 @@ export const getUserBookings = async (userId) => {
        b.booking_end,
        b.total_amount,
        b.status,
+       b.points_used,
+       b.paid_amount,
        v.name   AS venue_name,
        v.city   AS venue_city,
        v.address AS venue_address,
+       cp.refund_percentage,
+       cp.hours_before_start,
        bp.share_amount,
        bp.payment_status,
        bp.is_initiator
      FROM booking_participants bp
      JOIN bookings b ON b.booking_id = bp.booking_id
      JOIN venues   v ON v.venue_id  = b.venue_id
+     LEFT JOIN cancellation_policies cp ON v.cancellation_policy_id = cp.policy_id
      WHERE bp.user_id = ?
      ORDER BY b.booking_start DESC`,
     [userId]
   );
 
+  return rows;
+};
+
+export const createBlock = async (venueId, userId, startTime, endTime) => {
+  const sql = `
+        INSERT INTO bookings (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
+        VALUES (?, ?, ?, ?, 0, 'BLOCKED', 1)
+    `;
+  const [result] = await pool.execute(sql, [venueId, userId, startTime, endTime]);
+  return result.insertId;
+};
+
+export const getPricingRules = async (venueId) => {
+  const sql = `SELECT * FROM venue_pricing_rules WHERE venue_id = ?`;
+  const [rows] = await pool.execute(sql, [venueId]);
   return rows;
 };
 
@@ -298,7 +372,7 @@ export const hasBookingConflict = async (venueId, startDateTime, endDateTime) =>
     `SELECT COUNT(*) AS conflict_count
      FROM bookings
      WHERE venue_id = ?
-     AND status IN ('CONFIRMED', 'PENDING')
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
      AND (
        (booking_start < ? AND booking_end > ?) OR
        (booking_start >= ? AND booking_start < ?) OR
@@ -331,7 +405,7 @@ export const getBookedSlotsForDate = async (venueId, date) => {
      FROM bookings
      WHERE venue_id = ?
      AND DATE(booking_start) = ?
-     AND status IN ('CONFIRMED', 'PENDING')
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
      ORDER BY booking_start ASC`,
     [venueId, date]
   );
@@ -363,6 +437,94 @@ export const getBookingByPaymentReference = async (providerRef) => {
 };
 
 /**
+ * Get all bookings for an owner's venues
+ *
+ * Fetches all bookings for venues owned by the specified user
+ *
+ * @async
+ * @param {number} ownerId - Owner User ID
+ * @returns {Promise<Object[]>} Array of booking objects
+ */
+export const getOwnerBookings = async (ownerId) => {
+  const [rows] = await pool.execute(
+    `SELECT
+       b.booking_id,
+       b.booking_start,
+       b.booking_end,
+       b.total_amount,
+       b.status,
+       b.created_at,
+       v.name AS venue_name,
+       u.full_name AS customer_name,
+       u.email AS customer_email
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     LEFT JOIN users u ON b.created_by = u.user_id
+     WHERE v.owner_id = ?
+     ORDER BY b.booking_start DESC`,
+    [ownerId]
+  );
+  return rows;
+};
+
+/**
+ * Get analytics summary for an owner
+ *
+ * Aggregates statistics for owner's venues:
+ * - Total Bookings
+ * - Total Revenue
+ * - Active Venues Count
+ *
+ * @async
+ * @param {number} ownerId - Owner User ID
+ * @returns {Promise<Object>} Analytics summary object
+ */
+export const getOwnerAnalytics = async (ownerId) => {
+  const [bookingStats] = await pool.execute(
+    `SELECT
+       COUNT(*) AS total_bookings,
+       COALESCE(SUM(total_amount), 0) AS total_revenue
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     WHERE v.owner_id = ?
+     AND b.status IN ('CONFIRMED', 'COMPLETED')`,
+    [ownerId]
+  );
+
+  const [venueStats] = await pool.execute(
+    `SELECT COUNT(*) AS active_venues
+     FROM venues
+     WHERE owner_id = ? AND is_active = 1`,
+    [ownerId]
+  );
+
+  return {
+    ...bookingStats[0],
+    ...venueStats[0]
+  };
+};
+
+/**
+ * Check if user has a completed booking for a venue
+ *
+ * @async
+ * @param {number} userId - User ID
+ * @param {number} venueId - Venue ID
+ * @returns {Promise<boolean>} True if user has completed booking
+ */
+export const hasUserCompletedBooking = async (userId, venueId) => {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS count
+     FROM bookings
+     WHERE created_by = ?
+     AND venue_id = ?
+     AND status = 'COMPLETED'`, // Assuming 'COMPLETED' is the status for past bookings
+    [userId, venueId]
+  );
+  return rows[0].count > 0;
+};
+
+/**
  * Get database pool connection
  *
  * Returns the connection pool for transaction management.
@@ -372,4 +534,40 @@ export const getBookingByPaymentReference = async (providerRef) => {
  */
 export const getPool = () => {
   return pool;
+};
+
+/**
+ * Get a booking participant record
+ *
+ * Checks if a user is already a participant in a booking.
+ * Should be called within a transaction if lock is needed, but here we just read.
+ *
+ * @async
+ * @param {Object} conn - Database connection
+ * @param {number} bookingId - Booking ID
+ * @param {number} userId - User ID
+ * @returns {Promise<Object|null>} Participant record or null
+ */
+export const getBookingParticipant = async (conn, bookingId, userId) => {
+  const [rows] = await conn.execute(
+    "SELECT * FROM booking_participants WHERE booking_id = ? AND user_id = ?",
+    [bookingId, userId]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Get all participants for a booking
+ * 
+ * @param {number} bookingId 
+ * @returns {Promise<Array>} List of participants with share and status
+ */
+export const getBookingParticipants = async (bookingId) => {
+  const [rows] = await pool.execute(
+    `SELECT user_id, share_amount, is_initiator, payment_status 
+     FROM booking_participants 
+     WHERE booking_id = ?`,
+    [bookingId]
+  );
+  return rows;
 };

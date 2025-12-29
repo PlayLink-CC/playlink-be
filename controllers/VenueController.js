@@ -17,7 +17,15 @@ import {
   getAllVenues,
   findMostBookedVenuesThisWeek,
   searchVenues,
+  createVenue,
+  updateVenue as updateVenueService,
+  blockVenueSlot,
+  getVenuesByOwner,
+  getVenueById,
 } from "../services/VenueService.js";
+import * as VenueRepository from "../repositories/VenueRepository.js";
+import * as BookingRepository from "../repositories/BookingRepository.js";
+import { toMySQLDateTime } from "../utils/dateUtil.js";
 
 /**
  * Fetch all venues or search by query parameter
@@ -75,6 +83,165 @@ export const fetchTopWeeklyVenues = async (req, res) => {
     res.json(venues);
   } catch (err) {
     console.error("Error fetching top weekly venues:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Create a new venue
+ *
+ * @async
+ * @route POST /api/venues
+ * @access Protected (Venue Owner)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Object} Created venue object
+ * @returns {number} res.status - 201 on success, 500 on error
+ */
+export const create = async (req, res) => {
+  try {
+    const ownerId = req.user.id; // From auth middleware
+    const venueData = { ...req.body, ownerId };
+
+    const result = await createVenue(venueData);
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("Error creating venue:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * POST /api/venues/:id/reviews
+ * 
+ * Submit a review for a venue. User must have a completed booking.
+ */
+export const addReview = async (req, res) => {
+  const venueId = req.params.id;
+  const userId = req.user.id;
+  const { rating, comment } = req.body;
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ message: "Invalid rating (1-5)" });
+  }
+
+  try {
+    // 1. Verify completed booking
+    const hasCompleted = await BookingRepository.hasUserCompletedBooking(userId, venueId);
+    if (!hasCompleted) {
+      return res.status(403).json({
+        message: "You can only review venues you have stayed at (completed booking required)."
+      });
+    }
+
+    // 2. Create review
+    await VenueRepository.createReview({
+      venueId,
+      userId,
+      rating,
+      comment
+    });
+
+    res.status(201).json({ message: "Review submitted successfully" });
+  } catch (err) {
+    console.error("Error creating review:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Update a venue
+ * PUT /api/venues/:id
+ */
+export const update = async (req, res) => {
+  const { id } = req.params;
+
+  const updates = { ...req.body };
+
+  // Map frontend casing to DB column
+  if (updates.pricePerHour) {
+    updates.price_per_hour = updates.pricePerHour;
+    delete updates.pricePerHour;
+  }
+
+  try {
+    const success = await updateVenueService(id, updates);
+    if (!success) {
+      return res.status(404).json({ message: "Venue not found or no changes made" });
+    }
+    res.json({ message: "Venue updated successfully" });
+  } catch (err) {
+    console.error("Error updating venue:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Manually block a time slot
+ * POST /api/venues/:id/block
+ */
+export const blockSlot = async (req, res) => {
+  const { id } = req.params;
+  const { date, startTime, endTime, reason } = req.body;
+
+  if (!date || !startTime || !endTime) {
+    return res.status(400).json({ message: "Missing blocking details" });
+  }
+
+  try {
+    const start = new Date(`${date}T${startTime}:00`);
+    const end = new Date(`${date}T${endTime}:00`);
+
+    if (end <= start) {
+      return res.status(400).json({ message: "End time must be after start time" });
+    }
+
+    // Check conflicts
+    const bookingStart = toMySQLDateTime(start);
+    const bookingEnd = toMySQLDateTime(end);
+
+    const hasConflict = await BookingRepository.hasBookingConflict(id, bookingStart, bookingEnd);
+    if (hasConflict) {
+      return res.status(409).json({ message: "Slot already booked or blocked" });
+    }
+
+    await blockVenueSlot(id, req.user.id, bookingStart, bookingEnd, reason);
+    res.status(201).json({ message: "Slot blocked successfully" });
+  } catch (err) {
+    console.error("Error blocking slot:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Fetch venues owned by the authenticated user
+ * GET /api/venues/my-venues
+ */
+export const fetchMyVenues = async (req, res) => {
+  const ownerId = req.user.id;
+  try {
+    const venues = await getVenuesByOwner(ownerId);
+    res.json(venues);
+  } catch (err) {
+    console.error("Error fetching my venues:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Fetch venue details by ID
+ * GET /api/venues/:id
+ */
+export const fetchVenueById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const venue = await getVenueById(id);
+    res.json(venue);
+  } catch (err) {
+    console.error("Error fetching venue by ID:", err);
+    if (err.message === "Venue not found") {
+      return res.status(404).json({ message: "Venue not found" });
+    }
     res.status(500).json({ message: "Server error" });
   }
 };
