@@ -21,7 +21,8 @@ export const createCheckoutSession = async (req, res) => {
   const userId = req.user.id; // from auth middleware
   const userEmail = req.user.email;
 
-  const { venueId, date, time, hours, invites = [], useWallet = false } = req.body;
+  const { venueId, date, time, hours, invites: rawInvites = [], useWallet = false } = req.body;
+  const invites = rawInvites.filter(email => email !== userEmail);
 
   if (!venueId || !date || !time || !hours) {
     return res.status(400).json({ message: "Missing booking details" });
