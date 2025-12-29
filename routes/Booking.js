@@ -19,7 +19,7 @@ router.get("/checkout-success", authMiddleware, authorize(['PLAYER']), handleChe
 router.post("/pay-split-share", authMiddleware, authorize(['PLAYER']), paySplitShare);
 
 // Booking Management - Players
-router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER']), cancelBooking);
+router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER', 'VENUE_OWNER']), cancelBooking);
 router.patch("/:id/reschedule", authMiddleware, authorize(['PLAYER']), rescheduleBooking);
 
 router.get("/my", authMiddleware, authorize(['PLAYER']), getMyBookings);

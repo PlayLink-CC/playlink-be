@@ -31,6 +31,19 @@ export const cancelBooking = async (bookingId, userId) => {
         throw new Error("Booking is already cancelled");
     }
 
+    // Handle Unblocking (Venue Owner)
+    if (booking.status === 'BLOCKED') {
+        const pool = BookingRepository.getPool();
+        const conn = await pool.getConnection();
+        try {
+            const cancelTime = toMySQLDateTime(new Date());
+            await BookingRepository.updateBookingCancellation(conn, bookingId, cancelTime);
+            return { message: "Slot unblocked successfully", refundAmount: 0 };
+        } finally {
+            conn.release();
+        }
+    }
+
     // Policy Check
     const now = new Date();
     const start = new Date(booking.booking_start);
