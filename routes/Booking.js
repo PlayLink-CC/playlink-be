@@ -1,5 +1,5 @@
 import express from "express";
-import { authenticate as authMiddleware } from "../middleware/auth.js";
+import { authenticate as authMiddleware, authorize } from "../middleware/auth.js";
 import {
   createCheckoutSession,
   handleCheckoutSuccess,
@@ -13,15 +13,19 @@ import {
 
 const router = express.Router();
 
-// Stripe checkout
-router.post("/checkout-session", authMiddleware, createCheckoutSession);
-router.get("/checkout-success", authMiddleware, handleCheckoutSuccess);
-router.post("/pay-split-share", authMiddleware, paySplitShare);
-router.patch("/:id/cancel", authMiddleware, cancelBooking);
-router.patch("/:id/reschedule", authMiddleware, rescheduleBooking);
+// Stripe checkout - Players only
+router.post("/checkout-session", authMiddleware, authorize(['PLAYER']), createCheckoutSession);
+router.get("/checkout-success", authMiddleware, authorize(['PLAYER']), handleCheckoutSuccess);
+router.post("/pay-split-share", authMiddleware, authorize(['PLAYER']), paySplitShare);
 
-router.get("/my", authMiddleware, getMyBookings);
-router.get("/owner", authMiddleware, getOwnerBookings);
+// Booking Management - Players
+router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER', 'VENUE_OWNER']), cancelBooking);
+router.patch("/:id/reschedule", authMiddleware, authorize(['PLAYER']), rescheduleBooking);
+
+router.get("/my", authMiddleware, authorize(['PLAYER']), getMyBookings);
+
+// Booking Management - Owners
+router.get("/owner", authMiddleware, authorize(['VENUE_OWNER']), getOwnerBookings);
 
 // Get booked slots for a venue on a specific date
 router.get("/booked-slots/:venueId", getBookedSlots);

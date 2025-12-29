@@ -143,7 +143,20 @@ export const createCheckoutSession = async (req, res) => {
             currency: "LKR", // Points
             providerReference: `POINTS_${Date.now()}`
           });
-          await BookingRepository.updatePaymentStatus(conn, `POINTS_${Date.now()}`, 'SUCCEEDED'); // provider ref won't match, fix:
+          await BookingRepository.updatePaymentStatus(conn, `POINTS_${Date.now()}`, 'SUCCEEDED');
+
+          // CREDIT OWNER (Wallet Payment)
+          if (venue.owner_id) {
+            await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
+            await WalletRepository.createTransaction(conn, {
+              userId: venue.owner_id,
+              amount: totalAmount,
+              type: 'CREDIT',
+              description: `Revenue from Booking #${bookingId}`,
+              referenceType: 'BOOKING_PAYMENT',
+              referenceId: bookingId
+            });
+          }
 
           // Fix provider ref logic
           // Actually createPayment takes providerReference.
@@ -195,7 +208,8 @@ export const createCheckoutSession = async (req, res) => {
         share_amount: String(shareAmount),
         points_to_deduct: String(pointsToDeduct),
         points_used: String(pointsToDeduct),
-        paid_amount: String(amountToCharge)
+        paid_amount: String(amountToCharge),
+        owner_id: String(venue.owner_id) // Add owner_id for crediting
       },
       success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
@@ -237,16 +251,13 @@ export const handleCheckoutSuccess = async (req, res) => {
       venue_id, user_id, booking_start, booking_end,
       total_amount, cancellation_policy_id,
       invites, share_amount, points_to_deduct,
-      type, booking_id // for share payment
+      type, booking_id, owner_id // extract owner_id
     } = session.metadata;
 
     console.log(`[CheckoutSuccess] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}, Type: ${type}`);
 
     // DEBUG: Write to file
-    const fs = await import('fs');
-    try {
-      fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}\n`);
-    } catch (e) { console.error("Log fail", e); }
+    // Removed as per request
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
@@ -367,6 +378,21 @@ export const handleCheckoutSuccess = async (req, res) => {
         "UPDATE booking_participants SET payment_status = 'PAID' WHERE booking_id = ? AND is_initiator = 1",
         [bookingId]
       );
+
+      // CREDIT OWNER (Stripe Payment)
+      if (owner_id) {
+        const ownerIdNum = Number(owner_id);
+        const revenueAmount = Number(total_amount);
+        await WalletRepository.updateWalletBalance(conn, ownerIdNum, revenueAmount);
+        await WalletRepository.createTransaction(conn, {
+          userId: ownerIdNum,
+          amount: revenueAmount,
+          type: 'CREDIT',
+          description: `Revenue from Booking #${bookingId}`,
+          referenceType: 'BOOKING_REVENUE',
+          referenceId: bookingId
+        });
+      }
 
       const booking = await BookingRepository.getBookingWithVenue(conn, bookingId);
       await conn.commit();

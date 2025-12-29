@@ -40,6 +40,7 @@ router.get("/my-venues", authenticate, authorize(["VENUE_OWNER"]), VenueControll
 
 router.get("/:id", VenueController.fetchVenueById);
 router.put("/:id", authenticate, authorize(["VENUE_OWNER"]), VenueController.update);
+router.delete("/:id", authenticate, authorize(["VENUE_OWNER"]), VenueController.remove);
 router.post("/:id/block", authenticate, authorize(["VENUE_OWNER"]), VenueController.blockSlot);
 
 router.post("/:id/reviews", authenticate, VenueController.addReview);

@@ -31,25 +31,53 @@ export const cancelBooking = async (bookingId, userId) => {
         throw new Error("Booking is already cancelled");
     }
 
+    // Handle Unblocking (Venue Owner)
+    if (booking.status === 'BLOCKED') {
+        const pool = BookingRepository.getPool();
+        const conn = await pool.getConnection();
+        try {
+            const cancelTime = toMySQLDateTime(new Date());
+            await BookingRepository.updateBookingCancellation(conn, bookingId, cancelTime);
+            return { message: "Slot unblocked successfully", refundAmount: 0 };
+        } finally {
+            conn.release();
+        }
+    }
+
     // Policy Check
     const now = new Date();
     const start = new Date(booking.booking_start);
     const hoursRemaining = (start - now) / (1000 * 60 * 60);
 
-    let refundAmount = 0;
-    const policyHours = booking.hours_before_start || 0; // Default 0 if no policy
-    const refundPct = booking.refund_percentage || 0;
-
     if (hoursRemaining <= 0) {
         throw new Error("Cannot cancel a booking that has already started.");
     }
 
+    // FIX: Use total_amount as the base for refund calculation.
+    // In split payments or point payments, 'paid_amount' might be partial or 0 (if valid points logic wasn't fully capturing value).
+    // The refund should be based on the VALUE of the booking.
+    const baseAmount = Number(booking.total_amount);
+    const policyHours = booking.hours_before_start || 0; // Default 0 if no policy
+    const refundPct = booking.refund_percentage || 0;
+
+    console.log(`[CancelBooking] ID:${bookingId} BaseAmount:${baseAmount} PolicyHours:${policyHours} RefundPct:${refundPct} HoursRemaining:${hoursRemaining}`);
+
+    let playerRefund = 0;
+    let ownerRevenueCut = 0;
+
+    // Step B: The Math
     if (hoursRemaining > policyHours) {
-        // Full Refund (Tier 1)
-        refundAmount = Number(booking.total_amount);
+        // Full Refund
+        playerRefund = baseAmount;
+        ownerRevenueCut = 0;
     } else {
-        // Reduced Refund (Tier 2) - e.g. 90%
-        refundAmount = Number(booking.total_amount) * (Number(refundPct) / 100);
+        // Partial Refund (e.g. 90%)
+        // Partial Refund (e.g. 90%)
+        // player_refund = bookings.total_amount * (refund_percentage / 100)
+        // owner_revenue_cut = bookings.total_amount * (1 - (refund_percentage / 100))
+        const decimalRefund = Number(refundPct) / 100;
+        playerRefund = baseAmount * decimalRefund;
+        ownerRevenueCut = baseAmount * (1 - decimalRefund);
     }
 
     // Atomic Transaction
@@ -65,7 +93,7 @@ export const cancelBooking = async (bookingId, userId) => {
 
         // 2. Distribute Refunds
         const participants = await BookingRepository.getBookingParticipants(bookingId);
-        let totalRefundPool = refundAmount; // Total amount to be refunded
+        let totalRefundPool = playerRefund; // Total amount to be refunded
         let othersRefundTotal = 0;
 
         for (const p of participants) {
@@ -88,10 +116,6 @@ export const cancelBooking = async (bookingId, userId) => {
         }
 
         // 3. Final Initiator Credit (Remainder of the pool)
-        // If initiator didn't pay (impossible for CONFIRMED?), this logic still gives them the remainder?
-        // Assumption: Initiator paid the bulk or covered initial cost.
-        // If totalRefundPool is 0, initiatorRefund is 0.
-        // If others took all refund (unlikely), initiatorRefund is 0.
         const initiatorRefund = totalRefundPool - othersRefundTotal;
 
         if (initiatorRefund > 0) {
@@ -106,8 +130,24 @@ export const cancelBooking = async (bookingId, userId) => {
             });
         }
 
+        // 3.5 Deduct from Venue Owner
+        if (booking.owner_id && playerRefund > 0) {
+            // Deduct the Player Refund from Owner.
+            // Since Owner has 100% of Paid Amount, deducting Player Refund leaves them with Owner Cut.
+            // Owner Balance = (Initial + Paid) - PlayerRefund = Initial + OwnerCut.
+            await WalletRepository.updateWalletBalance(conn, booking.owner_id, -playerRefund);
+            await WalletRepository.createTransaction(conn, {
+                userId: booking.owner_id,
+                amount: -playerRefund,
+                type: 'DEBIT',
+                description: `Refund Deduction for Booking #${bookingId}`,
+                referenceType: 'REFUND_DEDUCTION',
+                referenceId: bookingId
+            });
+        }
+
         // 4. Update Participants / Payments Status
-        const status = refundAmount > 0 ? 'REFUNDED' : 'CANCELLED';
+        const status = playerRefund > 0 ? 'REFUNDED' : 'CANCELLED';
         await BookingRepository.updateParticipantsPaymentStatus(conn, bookingId, status);
         await conn.execute("UPDATE payments SET status = ? WHERE booking_id = ? AND status = 'SUCCEEDED'", ['REFUNDED', bookingId]);
 
@@ -115,8 +155,8 @@ export const cancelBooking = async (bookingId, userId) => {
 
         return {
             success: true,
-            refundAmount,
-            message: refundAmount > 0
+            refundAmount: playerRefund,
+            message: playerRefund > 0
                 ? `Booking cancelled. Refunds processed to wallets.`
                 : "Booking cancelled. No refund applicable."
         };
