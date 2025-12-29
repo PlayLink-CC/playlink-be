@@ -29,11 +29,12 @@ import pool from "../config/dbconnection.js";
  * @returns {string} venue.name - Venue name
  * @returns {number} venue.price_per_hour - Price per hour
  * @returns {number} venue.cancellation_policy_id - Cancellation policy ID
+ * @returns {number} venue.owner_id - Owner User ID
  * @throws {Error} Database connection error
  */
 export const getVenueById = async (venueId) => {
   const [rows] = await pool.execute(
-    "SELECT venue_id, name, price_per_hour, cancellation_policy_id FROM venues WHERE venue_id = ?",
+    "SELECT venue_id, name, price_per_hour, cancellation_policy_id, owner_id FROM venues WHERE venue_id = ?",
     [venueId]
   );
   return rows[0] || null;
@@ -250,7 +251,7 @@ export const getBookingWithPolicy = async (bookingId) => {
             cp.policy_id, cp.name as policy_name, cp.refund_percentage, cp.hours_before_start
      FROM bookings b
      JOIN venues v ON b.venue_id = v.venue_id
-     LEFT JOIN cancellation_policies cp ON v.cancellation_policy_id = cp.policy_id
+     LEFT JOIN cancellation_policies cp ON cp.policy_id = COALESCE(b.cancellation_policy_id, v.cancellation_policy_id)
      WHERE b.booking_id = ?`,
     [bookingId]
   );
@@ -498,9 +499,17 @@ export const getOwnerAnalytics = async (ownerId) => {
     [ownerId]
   );
 
+  const [walletStats] = await pool.execute(
+    `SELECT balance AS total_revenue 
+     FROM wallets 
+     WHERE user_id = ?`,
+    [ownerId]
+  );
+
   return {
     ...bookingStats[0],
-    ...venueStats[0]
+    ...venueStats[0],
+    total_revenue: Number(walletStats[0]?.total_revenue || 0)
   };
 };
 

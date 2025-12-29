@@ -7,6 +7,7 @@
  * Route Structure:
  * - /api/users/* → User authentication and management
  * - /api/venues/* → Venue listing and search
+ * - /api/policies/* → Cancellation Policies
  *
  * @module routes/index
  */
@@ -18,6 +19,7 @@ import bookingRoutes from "./Booking.js";
 import analyticsRoutes from "./Analytics.js";
 
 import walletRoutes from "./Wallet.js";
+import policyRoutes from "./Policy.js";
 
 const router = express.Router();
 
@@ -27,5 +29,6 @@ router.use("/venues", venueRoutes);
 router.use("/bookings", bookingRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/wallet", walletRoutes);
+router.use("/policies", policyRoutes);
 
 export default router;

@@ -19,6 +19,16 @@
 import connectDB from "../config/dbconnection.js";
 
 /**
+ * Get all cancellation policies
+ * 
+ * @returns {Promise<Array>} List of polices
+ */
+export const getAllPolicies = async () => {
+    const [rows] = await connectDB.execute("SELECT * FROM cancellation_policies");
+    return rows;
+};
+
+/**
  * Fetch all venues with complete details
  *
  * Retrieves all venues with aggregated information:
