@@ -580,3 +580,73 @@ export const getBookingParticipants = async (bookingId) => {
   );
   return rows;
 };
+/**
+ * Count active bookings for a venue
+ * Status: CONFIRMED, PENDING, BLOCKED
+ * 
+ * @param {number} venueId 
+ * @returns {Promise<number>}
+ */
+export const countActiveBookings = async (venueId) => {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS count 
+     FROM bookings 
+     WHERE venue_id = ? 
+     AND status IN ('CONFIRMED', 'PENDING')
+     AND booking_end > NOW()`,
+    [venueId]
+  );
+  return rows[0].count;
+};
+
+/**
+ * Delete all bookings for a venue (Cleanup)
+ * 
+ * Deletes participants and payments first, then bookings.
+ * Used when deleting a venue.
+ * 
+ * @param {number} venueId 
+ */
+export const deleteVenueBookings = async (venueId) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 0. Delete wallet transactions linked to bookings of this venue
+    await conn.execute(
+      `DELETE wt FROM wallet_transactions wt
+       INNER JOIN bookings b ON wt.booking_id = b.booking_id
+       WHERE b.venue_id = ?`,
+      [venueId]
+    );
+
+    // 1. Delete payments linked to bookings of this venue
+    await conn.execute(
+      `DELETE p FROM payments p
+       INNER JOIN bookings b ON p.booking_id = b.booking_id
+       WHERE b.venue_id = ?`,
+      [venueId]
+    );
+
+    // 2. Delete participants linked to bookings of this venue
+    await conn.execute(
+      `DELETE bp FROM booking_participants bp
+       INNER JOIN bookings b ON bp.booking_id = b.booking_id
+       WHERE b.venue_id = ?`,
+      [venueId]
+    );
+
+    // 3. Delete the bookings themselves
+    await conn.execute(
+      `DELETE FROM bookings WHERE venue_id = ?`,
+      [venueId]
+    );
+
+    await conn.commit();
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+};

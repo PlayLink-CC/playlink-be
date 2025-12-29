@@ -150,5 +150,16 @@ export const getVenueById = async (venueId) => {
  * Delete a venue
  */
 export const deleteVenue = async (venueId) => {
+  // 1. Check for active bookings
+  const activeCount = await BookingRepository.countActiveBookings(venueId);
+  if (activeCount > 0) {
+    throw new Error("Cannot delete venue with active (Confirmed, Pending, or Blocked) bookings. Please cancel or unblock them first.");
+  }
+
+  // 2. Delete history (Cancelled/Completed bookings) to satisfy foreign keys
+  // The user requested: "If it's cancelled then allow deletion" imply we should clear them.
+  await BookingRepository.deleteVenueBookings(venueId);
+
+  // 3. Delete the venue
   return await venueRepository.deleteVenue(venueId);
 };
