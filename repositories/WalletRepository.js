@@ -62,11 +62,7 @@ export const updateWalletBalance = async (conn, userId, amount) => {
       );
 
       // DEBUG: Write to file
-      const fs = await import('fs');
-      try {
-        const rowData = rows.length > 0 ? JSON.stringify(rows[0]) : "NO ROWS";
-        fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] WalletRepo Check - User: ${userId}, Rows: ${rowData}\n`);
-      } catch (e) { console.error("Log fail", e); }
+      // Removed as per request
 
       const currentBalance = Number(rows[0].balance);
 

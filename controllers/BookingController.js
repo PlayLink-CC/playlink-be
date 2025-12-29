@@ -257,10 +257,7 @@ export const handleCheckoutSuccess = async (req, res) => {
     console.log(`[CheckoutSuccess] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}, Type: ${type}`);
 
     // DEBUG: Write to file
-    const fs = await import('fs');
-    try {
-      fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}\n`);
-    } catch (e) { console.error("Log fail", e); }
+    // Removed as per request
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();

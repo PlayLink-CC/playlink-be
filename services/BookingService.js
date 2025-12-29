@@ -36,31 +36,35 @@ export const cancelBooking = async (bookingId, userId) => {
     const start = new Date(booking.booking_start);
     const hoursRemaining = (start - now) / (1000 * 60 * 60);
 
-    const paidAmount = Number(booking.paid_amount || booking.total_amount); // Fallback to total if paid not set
-    const policyHours = booking.hours_before_start || 0; // Default 0 if no policy
-    const refundPct = booking.refund_percentage || 0;
-
-    console.log(`[CancelBooking] ID:${bookingId} Paid:${paidAmount} PolicyHours:${policyHours} RefundPct:${refundPct} HoursRemaining:${hoursRemaining}`);
-
-    let playerRefund = 0;
-    let ownerRevenueCut = 0;
-
     if (hoursRemaining <= 0) {
         throw new Error("Cannot cancel a booking that has already started.");
     }
 
+    // FIX: Use total_amount as the base for refund calculation.
+    // In split payments or point payments, 'paid_amount' might be partial or 0 (if valid points logic wasn't fully capturing value).
+    // The refund should be based on the VALUE of the booking.
+    const baseAmount = Number(booking.total_amount);
+    const policyHours = booking.hours_before_start || 0; // Default 0 if no policy
+    const refundPct = booking.refund_percentage || 0;
+
+    console.log(`[CancelBooking] ID:${bookingId} BaseAmount:${baseAmount} PolicyHours:${policyHours} RefundPct:${refundPct} HoursRemaining:${hoursRemaining}`);
+
+    let playerRefund = 0;
+    let ownerRevenueCut = 0;
+
     // Step B: The Math
     if (hoursRemaining > policyHours) {
         // Full Refund
-        playerRefund = paidAmount;
+        playerRefund = baseAmount;
         ownerRevenueCut = 0;
     } else {
         // Partial Refund (e.g. 90%)
-        // player_refund = bookings.paid_amount * (refund_percentage / 100)
-        // owner_revenue_cut = bookings.paid_amount * (1 - (refund_percentage / 100))
+        // Partial Refund (e.g. 90%)
+        // player_refund = bookings.total_amount * (refund_percentage / 100)
+        // owner_revenue_cut = bookings.total_amount * (1 - (refund_percentage / 100))
         const decimalRefund = Number(refundPct) / 100;
-        playerRefund = paidAmount * decimalRefund;
-        ownerRevenueCut = paidAmount * (1 - decimalRefund);
+        playerRefund = baseAmount * decimalRefund;
+        ownerRevenueCut = baseAmount * (1 - decimalRefund);
     }
 
     // Atomic Transaction
