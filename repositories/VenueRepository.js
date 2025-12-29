@@ -457,17 +457,38 @@ export const findVenueById = async (venueId) => {
  * @param {number} venueId
  * @returns {Promise<boolean>} True if deleted
  */
+/**
+ * Delete a venue by ID (including all dependencies)
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<boolean>} True if deleted
+ */
 export const deleteVenue = async (venueId) => {
-    // We can either do soft delete or hard delete.
-    // Given the foreign key constraints likely exist (bookings, images, sports), hard delete might fail if not cascaded.
-    // However, usually soft delete 'is_active = 0' is safer for business logic.
-    // Or we try DELETE and rely on CASCADE if set. 
-    // Checking the user request: "only deletes the venues".
-    // I will try DELETE first. If it fails, I might need to delete dependencies.
-    // Actually, looking at CREATE, we insert separately. 
-    // Let's implement DELETE. If schema has ON DELETE CASCADE, it works.
+    const conn = await connectDB.getConnection();
+    try {
+        await conn.beginTransaction();
 
-    // Better safely: DELETE FROM venues WHERE venue_id = ?
-    const [result] = await connectDB.execute("DELETE FROM venues WHERE venue_id = ?", [venueId]);
-    return result.affectedRows > 0;
+        // 1. Delete Dependencies
+        await conn.execute("DELETE FROM venue_pricing_rules WHERE venue_id = ?", [venueId]);
+        await conn.execute("DELETE FROM venue_images WHERE venue_id = ?", [venueId]);
+        await conn.execute("DELETE FROM venue_sports WHERE venue_id = ?", [venueId]);
+        await conn.execute("DELETE FROM venue_amenities WHERE venue_id = ?", [venueId]);
+        await conn.execute("DELETE FROM reviews WHERE venue_id = ?", [venueId]);
+
+        // Note: Bookings are deleted by BookingService/Repository before calling this, 
+        // but we can ensure safety here too if we want, but circular dependency might be an issue if we import BookingRepo.
+        // We assume Booking dependencies (Bookings, Participants, Payments) are already handled by the Service.
+
+        // 2. Delete Venue
+        const [result] = await conn.execute("DELETE FROM venues WHERE venue_id = ?", [venueId]);
+
+        await conn.commit();
+        return result.affectedRows > 0;
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally {
+        conn.release();
+    }
 };

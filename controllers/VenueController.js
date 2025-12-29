@@ -264,7 +264,7 @@ export const remove = async (req, res) => {
   const ownerId = req.user.id;
 
   try {
-    // Optional: Verify ownership before delete (Service might do it, or we check here)
+    // Verify ownership
     const venue = await VenueRepository.findVenueById(id);
     if (!venue) {
       return res.status(404).json({ message: "Venue not found" });
@@ -273,16 +273,19 @@ export const remove = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const success = await VenueRepository.deleteVenue(id);
-    if (!success) {
-      return res.status(404).json({ message: "Venue not found or could not be deleted" });
-    }
+    // Call Service to handle deletion (including cleanup and checks)
+    await deleteVenue(id);
+
     res.json({ message: "Venue deleted successfully" });
   } catch (err) {
     console.error("Error deleting venue:", err);
-    // Handle FK violations (e.g. existing bookings)
+    // Return specific error message (e.g., from countActiveBookings)
+    // If it's a known business error, return 400.
+    if (err.message.includes("Cannot delete venue")) {
+      return res.status(400).json({ message: err.message });
+    }
     if (err.code === 'ER_ROW_IS_REFERENCED_2') {
-      return res.status(400).json({ message: "Cannot delete venue with existing bookings or data." });
+      return res.status(400).json({ message: "Cannot delete venue with existing bookings or data (FK Constraint)." });
     }
     res.status(500).json({ message: "Server error" });
   }
