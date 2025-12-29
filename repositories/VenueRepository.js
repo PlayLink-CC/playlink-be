@@ -412,7 +412,10 @@ export const findVenueById = async (venueId) => {
         vi.image_url AS primary_image,
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
         v.description,
-        v.cancellation_policy_id
+        v.cancellation_policy_id,
+        cp.name AS policy_name,
+        cp.refund_percentage,
+        cp.hours_before_start
     FROM venues v
     LEFT JOIN venue_sports vs 
         ON vs.venue_id = v.venue_id
@@ -425,6 +428,8 @@ export const findVenueById = async (venueId) => {
         ON va.venue_id = v.venue_id
     LEFT JOIN amenities a 
         ON a.amenity_id = va.amenity_id
+    LEFT JOIN cancellation_policies cp
+        ON cp.policy_id = v.cancellation_policy_id
     WHERE v.venue_id = ?
     GROUP BY 
         v.venue_id,
@@ -436,7 +441,10 @@ export const findVenueById = async (venueId) => {
         v.price_per_hour,
         vi.image_url,
         v.description,
-        v.cancellation_policy_id
+        v.cancellation_policy_id,
+        policy_name,
+        refund_percentage,
+        hours_before_start
     `;
     const [rows] = await connectDB.execute(sql, [venueId]);
     return rows[0];
