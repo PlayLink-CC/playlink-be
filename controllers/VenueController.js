@@ -104,6 +104,10 @@ export const create = async (req, res) => {
     const ownerId = req.user.id; // From auth middleware
     const venueData = { ...req.body, ownerId };
 
+    if (venueData.pricePerHour < 1000) {
+      return res.status(400).json({ message: "Price must be at least 1000" });
+    }
+
     const result = await createVenue(venueData);
     res.status(201).json(result);
   } catch (err) {
@@ -163,6 +167,10 @@ export const update = async (req, res) => {
   if (updates.pricePerHour) {
     updates.price_per_hour = updates.pricePerHour;
     delete updates.pricePerHour;
+  }
+
+  if (updates.price_per_hour !== undefined && Number(updates.price_per_hour) < 1000) {
+    return res.status(400).json({ message: "Price must be at least 1000" });
   }
 
   try {
