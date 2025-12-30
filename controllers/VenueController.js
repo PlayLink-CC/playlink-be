@@ -26,7 +26,7 @@ import {
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
-import { toMySQLDateTime } from "../utils/dateUtil.js";
+import { toMySQLDateTime, createISTDate } from "../utils/dateUtil.js";
 
 /**
  * Fetch all venues or search by query parameter
@@ -198,8 +198,8 @@ export const blockSlot = async (req, res) => {
   }
 
   try {
-    const start = new Date(`${date}T${startTime}:00`);
-    const end = new Date(`${date}T${endTime}:00`);
+    const start = createISTDate(date, startTime);
+    const end = createISTDate(date, endTime);
 
     if (end <= start) {
       return res.status(400).json({ message: "End time must be after start time" });
