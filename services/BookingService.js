@@ -1,7 +1,7 @@
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as WalletRepository from "../repositories/WalletRepository.js";
 import * as DateUtil from "../utils/dateUtil.js";
-import { toMySQLDateTime } from "../utils/dateUtil.js";
+import { toMySQLDateTime, createISTDate } from "../utils/dateUtil.js";
 
 /**
  * Booking Service
@@ -184,7 +184,7 @@ export const rescheduleBooking = async (bookingId, userId, newDate, newTime, hou
     if (booking.created_by !== userId) throw new Error("Unauthorized");
     if (booking.status !== 'CONFIRMED') throw new Error("Can only reschedule CONFIRMED bookings");
 
-    const start = new Date(`${newDate}T${newTime}:00`);
+    const start = createISTDate(newDate, newTime);
     const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
 
     // Basic Time Validations

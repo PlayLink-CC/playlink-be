@@ -115,9 +115,30 @@ export const getTimeValidationError = (timeString, durationHours) => {
     return "Booking must be at least 1 hour";
   }
 
+
   if (duration > 4) {
     return "Booking cannot exceed 4 hours";
   }
 
   return null;
+};
+
+/**
+ * Create a Date object representing the given date and time in IST (UTC+05:30)
+ * 
+ * This function takes a date string (YYYY-MM-DD) and time string (HH:MM)
+ * and constructs a Date object that effectively treats the input as IST.
+ * 
+ * Since Server might be UTC, "2025-12-31 09:00" -> 
+ * If we just do new Date("2025-12-31T09:00:00"), in UTC env it is 09:00 UTC.
+ * But we want it to be 09:00 IST = 03:30 UTC.
+ * 
+ * So we construct the string with offset: "2025-12-31T09:00:00+05:30"
+ * 
+ * @param {string} dateStr - YYYY-MM-DD
+ * @param {string} timeStr - HH:MM
+ * @returns {Date} 
+ */
+export const createISTDate = (dateStr, timeStr) => {
+  return new Date(`${dateStr}T${timeStr}:00+05:30`);
 };

@@ -4,7 +4,8 @@ import {
   isValid15MinInterval,
   isWithinBookingWindow,
   doesBookingFitInWindow,
-  getTimeValidationError
+  getTimeValidationError,
+  createISTDate
 } from "../utils/dateUtil.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as WalletRepository from "../repositories/WalletRepository.js";
@@ -45,7 +46,7 @@ export const createCheckoutSession = async (req, res) => {
     }
 
     // 2) Compute start/end times
-    const start = new Date(`${date}T${time}:00`);
+    const start = createISTDate(date, time);
     const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
     const now = new Date();
     if (start.getTime() <= now.getTime()) {
