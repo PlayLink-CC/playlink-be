@@ -89,6 +89,15 @@ export const updateVenue = async (venueId, updates) => {
   if (updates.name !== undefined && (!updates.name || !updates.name.trim())) {
     throw new Error("Venue name cannot be empty");
   }
+  if (updates.address !== undefined && (!updates.address || !updates.address.trim())) {
+    throw new Error("Address cannot be empty");
+  }
+  if (updates.city !== undefined && (!updates.city || !updates.city.trim())) {
+    throw new Error("City cannot be empty");
+  }
+  if (updates.description !== undefined && (!updates.description || !updates.description.trim())) {
+    throw new Error("Description cannot be empty");
+  }
   return await venueRepository.updateVenue(venueId, updates);
 };
 
