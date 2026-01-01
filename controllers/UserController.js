@@ -68,10 +68,11 @@ export const register = async (req, res) => {
         .json({ message: "Full name, email and password are required" });
     }
 
-    if (password.length < 8) {
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+    if (!passwordRegex.test(password)) {
       return res
         .status(400)
-        .json({ message: "Password must be at least 8 characters long" });
+        .json({ message: "Password must match requirements: 8+ chars, 1 uppercase, 1 lowercase, 1 number, 1 special char." });
     }
 
     // Default to PLAYER (standard user), but allow VENUE_OWNER if specified
