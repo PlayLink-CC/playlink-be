@@ -1,6 +1,6 @@
 # PlayLink Backend API
 
-A Node.js/Express-based REST API for managing sports venues, bookings, and user authentication. This backend supports venue search, booking management, and user account functionality.
+A robust Node.js/Express-based REST API for managing sports venues, bookings, and user authentication. This backend serves as the core logic layer for the PlayLink platform, handling data persistence, business rules, and security.
 
 ## Table of Contents
 
@@ -18,24 +18,30 @@ A Node.js/Express-based REST API for managing sports venues, bookings, and user 
 ## Project Structure
 
 ```
-backend/
+BackEnd/
 ├── server.js                 # Entry point - Express app initialization
 ├── package.json              # Project dependencies
 ├── config/
 │   └── dbconnection.js       # MySQL connection pool setup
-├── controllers/
-│   ├── UserController.js     # User-related request handlers
-│   └── VenueController.js    # Venue-related request handlers
-├── services/
-│   ├── UserService.js        # User business logic
-│   └── VenueService.js       # Venue business logic
-├── repositories/
-│   ├── UserRepository.js     # User data access layer
-│   └── VenueRepository.js    # Venue data access layer
-├── routes/
+├── controllers/              # Request Handlers
+│   ├── AuthController.js
+│   ├── BookingController.js
+│   ├── UserController.js
+│   └── VenueController.js
+├── services/                 # Business Logic
+│   ├── BookingService.js
+│   ├── UserService.js
+│   └── VenueService.js
+├── repositories/             # Data Access Layer
+│   ├── BookingRepository.js
+│   ├── UserRepository.js
+│   └── VenueRepository.js
+├── routes/                   # Route Definitions
 │   ├── index.js              # Route aggregator
-│   ├── User.js               # User route definitions
-│   └── Venue.js              # Venue route definitions
+│   ├── authRequests.js
+│   ├── bookingRequests.js
+│   ├── userRequests.js
+│   └── venueRequests.js
 ├── middleware/
 │   └── auth.js               # JWT authentication middleware
 └── utils/
@@ -44,11 +50,11 @@ backend/
 
 ### Architecture Pattern
 
-This project follows the **3-Layer Architecture** pattern:
+This project follows the **3-Layer Architecture** pattern (Controller-Service-Repository):
 
-1. **Controllers** → Handle HTTP requests/responses
-2. **Services** → Contain business logic and validation
-3. **Repositories** → Manage database operations
+1. **Controllers**: Handle HTTP requests, parse input, and send responses.
+2. **Services**: Contain business logic, validation, and complex operations.
+3. **Repositories**: direct interface with the MySQL database.
 
 This separation ensures clean, maintainable, and testable code.
 
@@ -58,16 +64,15 @@ This separation ensures clean, maintainable, and testable code.
 
 ### Prerequisites
 
-- Node.js (v14 or higher)
-- MySQL database
-- npm or yarn package manager
+- Node.js (v18 or higher)
+- MySQL database (v8.0+)
+- npm or yarn
 
 ### Steps
 
-1. **Clone the repository**
+1. **Navigate to the backend directory**
    ```bash
-   git clone <repository-url>
-   cd backend
+   cd BackEnd
    ```
 
 2. **Install dependencies**
@@ -75,27 +80,28 @@ This separation ensures clean, maintainable, and testable code.
    npm install
    ```
 
-3. **Create `.env` file in the root directory** with your database credentials:
+3. **Configure Environment Variables**
+   Create a `.env` file in the `BackEnd` root directory with your credentials:
    ```env
    DB_HOST=localhost
    DB_USER=root
    DB_PASSWORD=your_password
    DB_NAME=playlink_db
    DB_PORT=3306
-   JWT_SECRET=your_secret_key_here
+   JWT_SECRET=your_secure_random_secret_string
    PORT=3000
    ```
 
 4. **Run the server**
    ```bash
+   # Development mode (with auto-restart)
+   npm run dev
+
    # Production mode
    npm start
-
-   # Development mode with auto-restart
-   npm run dev
    ```
 
-The API will be available at `http://localhost:3000`
+The API will be available at `http://localhost:3000`.
 
 ---
 
@@ -106,378 +112,93 @@ The API will be available at `http://localhost:3000`
 | `DB_HOST` | MySQL server hostname | localhost |
 | `DB_USER` | MySQL username | - |
 | `DB_PASSWORD` | MySQL password | - |
-| `DB_NAME` | Database name | - |
+| `DB_NAME` | Database name | playlink_db |
 | `DB_PORT` | MySQL port | 3306 |
-| `JWT_SECRET` | Secret key for JWT signing | dev-secret-key-change-me |
+| `JWT_SECRET` | Secret key for signing JWTs | - |
 | `PORT` | Server port | 3000 |
 
 ---
 
-## Architecture
+## Architecture Flow
 
-### Request Flow
-
-```
-HTTP Request
-    ↓
-Route (routes/*.js)
-    ↓
-Controller (controllers/*.js) - Validates input, calls service
-    ↓
-Service (services/*.js) - Business logic, data transformation
-    ↓
-Repository (repositories/*.js) - Database queries
-    ↓
-Database (MySQL)
-    ↓
-Response (JSON)
+```mermaid
+graph LR
+    A[HTTP Request] --> B[Route]
+    B --> C[Controller]
+    C --> D[Service]
+    D --> E[Repository]
+    E --> F[(MySQL Database)]
 ```
 
 ---
 
-## API Endpoints
+## API Endpoints Overview
 
-### User Endpoints
+### 👤 Users & Auth
+- `POST /api/users/login` - Authenticate user
+- `POST /api/users/register` - Create new account
+- `GET /api/users/me` - Get current user profile
+- `GET /api/users` - List all users (Admin)
 
-#### POST `/api/users/login`
-Authenticate a user and create a session token.
+### 🏟️ Venues
+- `GET /api/venues` - List/Search venues
+- `GET /api/venues/:id` - Get venue details
+- `POST /api/venues` - Create venue (Owner only)
+- `GET /api/venues/top-weekly` - Get trending venues
 
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
+### 📅 Bookings
+- `POST /api/bookings` - Create a new booking
+- `GET /api/bookings/my-bookings` - Get user's booking history
+- `POST /api/bookings/checkout` - Process payment and finalize booking
 
-**Response (200 OK):**
-```json
-{
-  "id": 1,
-  "fullName": "John Doe",
-  "email": "user@example.com",
-  "phone": "1234567890",
-  "accountType": "regular",
-  "createdAt": "2024-01-15T10:30:00Z",
-  "updatedAt": "2024-01-15T10:30:00Z"
-}
-```
-
-**Errors:**
-- `400 Bad Request` - Missing email or password
-- `401 Unauthorized` - Invalid credentials
-- `500 Server Error` - Database error
-
-**Note:** On successful login, an `authToken` cookie is set (httpOnly, expires in 1 hour).
-
----
-
-#### GET `/api/users/authenticate`
-Check the current session without authentication middleware.
-
-**Response (200 OK):**
-```json
-{
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "accountType": "regular"
-  }
-}
-```
-
-**Errors:**
-- `403 Forbidden` - Session expired or no token
-
----
-
-#### GET `/api/users/me`
-Get the current authenticated user's information. **Protected route.**
-
-**Headers:**
-```
-Cookie: authToken=<jwt_token>
-```
-
-**Response (200 OK):**
-```json
-{
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "accountType": "regular"
-  }
-}
-```
-
-**Errors:**
-- `403 Forbidden` - Invalid or missing token
-
----
-
-#### GET `/api/users`
-Retrieve all users. **Protected route.**
-
-**Response (200 OK):**
-```json
-[
-  {
-    "id": 1,
-    "fullName": "John Doe",
-    "email": "john@example.com",
-    "phone": "1234567890",
-    "accountType": "regular",
-    "createdAt": "2024-01-15T10:30:00Z",
-    "updatedAt": "2024-01-15T10:30:00Z"
-  },
-  ...
-]
-```
-
----
-
-### Venue Endpoints
-
-#### GET `/api/venues`
-Fetch all venues or search for venues by name, location, or sport type.
-
-**Query Parameters:**
-- `search` (optional) - Search term to filter venues by name, address, city, or sport
-
-**Response (200 OK):**
-```json
-[
-  {
-    "venue_id": 1,
-    "venue_name": "Downtown Sports Complex",
-    "location": "123 Main St, City",
-    "court_types": "Basketball, Badminton",
-    "price_per_hour": 50,
-    "primary_image": "https://example.com/image.jpg",
-    "amenities": "Parking, WiFi, Locker Room"
-  },
-  ...
-]
-```
-
-**Examples:**
-- Get all venues: `GET /api/venues`
-- Search venues: `GET /api/venues?search=basketball`
-
----
-
-#### GET `/api/venues/top-weekly`
-Get the top 4 most booked venues from the past 7 days.
-
-**Response (200 OK):**
-```json
-[
-  {
-    "venue_id": 1,
-    "venue_name": "Downtown Sports Complex",
-    "location": "123 Main St, City",
-    "price_per_hour": 50,
-    "primary_image": "https://example.com/image.jpg",
-    "amenities": "Parking, WiFi, Locker Room",
-    "bookings_this_week": 15
-  },
-  ...
-]
-```
+*(Note: Provide the token in the `authToken` cookie or Authorization header as required by specific endpoints)*
 
 ---
 
 ## Database Schema
 
-### Key Tables
+### Core Tables
 
-#### Users
-```sql
-- user_id (PK)
-- full_name
-- email (UNIQUE)
-- password_hash
-- phone
-- account_type (enum: 'regular', 'venue_owner', 'admin')
-- created_at
-- updated_at
-```
+#### `users`
+- **user_id** (PK): Unique identifier
+- **email**: User email (Unique)
+- **password_hash**: Bcrypt hashed password
+- **account_type**: `regular`, `venue_owner`, `admin`
 
-#### Venues
-```sql
-- venue_id (PK)
-- name
-- address
-- city
-- price_per_hour
-- is_active
-- created_at
-- updated_at
-```
+#### `venues`
+- **venue_id** (PK): Unique venue ID
+- **name**: Name of the venue
+- **price_per_hour**: Hourly rate
+- **location**: Physical address
 
-#### Bookings
-```sql
-- booking_id (PK)
-- user_id (FK)
-- venue_id (FK)
-- booking_start
-- booking_end
-- status (enum: 'PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED')
-- created_at
-- updated_at
-```
-
-#### Venues ↔ Sports (Many-to-Many)
-```sql
-- venue_sports.venue_id (FK)
-- venue_sports.sport_id (FK)
-- sports.sport_id (PK)
-- sports.name
-```
-
-#### Amenities
-```sql
-- amenities.amenity_id (PK)
-- amenities.name
-- venue_amenities.venue_id (FK)
-- venue_amenities.amenity_id (FK)
-```
-
-#### Venue Images
-```sql
-- venue_images.image_id (PK)
-- venue_images.venue_id (FK)
-- venue_images.image_url
-- venue_images.is_primary (boolean)
-```
+#### `bookings`
+- **booking_id** (PK): Unique booking ID
+- **user_id** (FK): User who made the booking
+- **venue_id** (FK): Venue being booked
+- **status**: `confirmed`, `pending`, `cancelled`
 
 ---
 
 ## Authentication
 
-### JWT Token Flow
+### JWT Strategy
 
-1. **User logs in** via `POST /api/users/login`
-2. **Server generates JWT** containing:
-   - User ID
-   - Email
-   - Account Type
-   - Expiration time (2 hours)
-3. **Token stored** in an `authToken` cookie (httpOnly, secure, signed)
-4. **Protected routes** verify the token via `authenticate` middleware
-5. **User data attached** to `req.user` for downstream access
-
-### Token Details
-
-- **Algorithm:** HS256
-- **Expiration:** 2 hours
-- **Storage:** HTTP-only signed cookie
-- **Verification:** via `fast-jwt` library
-
-### Cookie Configuration
-
-- `httpOnly: true` - Prevents client-side JavaScript access
-- `secure: false` - Set to `true` in production (HTTPS only)
-- `maxAge: 3600000` - 1 hour expiration
-- `signed: true` - Cryptographically signed
-- `sameSite: 'None'` - Cross-site request allowed (adjust for security needs)
+1. **Login**: User submits credentials.
+2. **Token Creation**: Server validates credentials and signs a JWT containing `userId` and `accountType`.
+3. **Storage**: The token is sent back to the client, typically stored in an **HTTP-only cookie** for security.
+4. **Verification**: Protected routes use the `authenticate` middleware to verify the token signature before granting access.
 
 ---
 
 ## Development
 
-### Running in Development Mode
-
+### Running Tests
+(If testing is implemented)
 ```bash
-npm run dev
+npm test
 ```
 
-Uses `nodemon` to automatically restart the server on file changes.
-
-### Testing Endpoints
-
-Using `curl`:
-
-```bash
-# Login
-curl -X POST http://localhost:3000/api/users/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password123"}' \
-  -c cookies.txt
-
-# Get current user (with cookies)
-curl http://localhost:3000/api/users/me \
-  -b cookies.txt
-
-# Search venues
-curl "http://localhost:3000/api/venues?search=basketball"
-
-# Get top weekly venues
-curl http://localhost:3000/api/venues/top-weekly
-```
-
-### Dependencies
-
-- **express** - Web framework
-- **mysql2** - MySQL driver with connection pooling
-- **jsonwebtoken** - JWT token generation & verification
-- **fast-jwt** - High-performance JWT library
-- **bcryptjs** - Password hashing & verification
-- **cors** - Cross-Origin Resource Sharing middleware
-- **cookie-parser** - Parse signed cookies
-- **dotenv** - Environment variable management
-
-### Dev Dependencies
-
-- **nodemon** - Auto-restart on file changes
-
----
-
-## Best Practices
-
-1. **Always use parameterized queries** to prevent SQL injection
-2. **Hash passwords** using bcryptjs before storing
-3. **Validate input** in controllers before processing
-4. **Use try-catch** blocks for error handling
-5. **Set JWT_SECRET** in production environment
-6. **Use HTTPS** in production
-7. **Store sensitive data** in environment variables
-8. **Use connection pooling** for database queries
-
----
-
-## Security Notes
-
-⚠️ **Before deploying to production:**
-
-1. Set `secure: true` in cookie configuration for HTTPS
-2. Change `JWT_SECRET` to a strong, random value
-3. Update CORS origin to your frontend domain
-4. Enable HTTPS on your server
-5. Implement rate limiting on login endpoint
-6. Add input validation and sanitization
-7. Consider adding request logging and monitoring
-
----
-
-## Troubleshooting
-
-### Connection Issues
-
-**Error: Cannot connect to database**
-- Verify MySQL is running
-- Check `.env` credentials
-- Ensure database exists
-
-### Authentication Issues
-
-**Error: Token is invalid or expired**
-- Clear browser cookies
-- Log in again to get a fresh token
-- Check JWT_SECRET matches
-
-### CORS Issues
-
-**Error: CORS policy blocked request**
-- Verify frontend URL in CORS configuration
-- Check `credentials: true` is set
+### Best Practices
+- **Service Layer**: Keep controllers "thin" by moving logic to Services.
+- **SQL Injection**: Always use parameterized queries in Repositories.
+- **Async/Await**: Use modern async syntax for database operations.
