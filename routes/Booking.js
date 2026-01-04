@@ -9,6 +9,7 @@ import {
   paySplitShare,
   cancelBooking,
   rescheduleBooking,
+  getAvailableTimeSlots,
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -29,5 +30,8 @@ router.get("/owner", authMiddleware, authorize(['VENUE_OWNER']), getOwnerBooking
 
 // Get booked slots for a venue on a specific date
 router.get("/booked-slots/:venueId", getBookedSlots);
+
+// Get available slots
+router.get("/available-slots/:venueId", getAvailableTimeSlots);
 
 export default router;

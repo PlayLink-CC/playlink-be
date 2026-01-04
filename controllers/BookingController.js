@@ -600,3 +600,66 @@ export const rescheduleBooking = async (req, res) => {
     return res.status(400).json({ message: err.message });
   }
 };
+
+/**
+ * GET /api/bookings/available-slots/:venueId
+ * Query: date (YYYY-MM-DD), hours (number)
+ */
+export const getAvailableTimeSlots = async (req, res) => {
+  const { venueId } = req.params;
+  const { date, hours } = req.query;
+
+  if (!venueId || !date || !hours) {
+    return res.status(400).json({ message: "Missing required parameters" });
+  }
+
+  try {
+    const duration = Number(hours);
+    const slots = await BookingRepository.getBookedSlotsForDate(venueId, date);
+
+    // Define operating hours (7 AM to 10 PM)
+    // In a real app, this should come from Venue settings
+    const openTime = 7 * 60; // 7:00 AM
+    const closeTime = 22 * 60; // 10:00 PM
+
+    const availableSlots = [];
+    const step = 60; // 1 hour intervals for cleaner UI, or 30 mins
+
+    // Generate all possible start times
+    for (let time = openTime; time <= closeTime - (duration * 60); time += step) {
+      const h = Math.floor(time / 60);
+      const m = time % 60;
+      const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+      const startDateTime = new Date(`${date}T${timeStr}:00`);
+      const endDateTime = new Date(startDateTime.getTime() + duration * 60 * 60 * 1000);
+
+      // Check conflict
+      let conflict = false;
+      for (const slot of slots) {
+        const slotStart = new Date(slot.booking_start);
+        const slotEnd = new Date(slot.booking_end);
+
+        // Check overlap
+        if (startDateTime < slotEnd && endDateTime > slotStart) {
+          conflict = true;
+          break;
+        }
+      }
+
+      // Check current time if date is today
+      const now = new Date();
+      if (startDateTime <= now) {
+        conflict = true;
+      }
+
+      availableSlots.push({ time: timeStr, available: !conflict });
+    }
+
+    return res.json({ slots: availableSlots });
+
+  } catch (err) {
+    console.error("Error fetching available slots:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
