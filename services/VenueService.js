@@ -15,6 +15,7 @@
 
 import * as venueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
+import { createISTDate, toMySQLDateTime } from "../utils/dateUtil.js";
 
 /**
  * Retrieve all venues from the database
@@ -29,6 +30,13 @@ import * as BookingRepository from "../repositories/BookingRepository.js";
 export const getAllVenues = async () => {
   const venues = await venueRepository.findAllVenues();
   return venues;
+};
+
+/**
+ * Get all available amenities
+ */
+export const getAllAmenities = async () => {
+  return await venueRepository.getAllAmenities();
 };
 
 /**
@@ -104,8 +112,61 @@ export const updateVenue = async (venueId, updates) => {
 /**
  * Block a venue slot
  */
-export const blockVenueSlot = async (venueId, userId, start, end, reason) => {
-  return await BookingRepository.createBlock(venueId, userId, start, end, reason);
+/**
+ * Block a venue slot (Single or Recurring)
+ */
+export const blockVenueSlot = async (venueId, userId, dateStr, startTime, endTime, reason, recurrence) => {
+  let blockedCount = 0;
+  let conflictCount = 0;
+
+  // Function to process a single slot
+  const processSlot = async (currentDateStr) => {
+    const start = createISTDate(currentDateStr, startTime);
+    const end = createISTDate(currentDateStr, endTime);
+    const sSql = toMySQLDateTime(start);
+    const eSql = toMySQLDateTime(end);
+
+    const hasConflict = await BookingRepository.hasBookingConflict(venueId, sSql, eSql);
+    if (!hasConflict) {
+      await BookingRepository.createBlock(venueId, userId, sSql, eSql, reason);
+      return true;
+    }
+    return false;
+  };
+
+  if (!recurrence || recurrence.type === 'single') {
+    const success = await processSlot(dateStr);
+    if (!success) throw new Error("Slot already booked or blocked");
+    return { blocked: 1, conflicts: 0 };
+  }
+
+  // Recurring Logic
+  const { daysOfWeek, untilDate } = recurrence; // daysOfWeek: [0-6], 0=Sun
+  const startObj = new Date(dateStr);
+  const endObj = new Date(untilDate);
+  const MAX_RECURRENCE_MONTHS = 6;
+
+  // Safety check: Don't allow infinite loops or too far future
+  const maxDate = new Date(startObj);
+  maxDate.setMonth(maxDate.getMonth() + MAX_RECURRENCE_MONTHS);
+  if (endObj > maxDate) {
+    throw new Error(`Cannot block more than ${MAX_RECURRENCE_MONTHS} months in advance`);
+  }
+
+  let cursor = new Date(startObj);
+  while (cursor <= endObj) {
+    // Check if current day (0-6) is in selected days
+    if (daysOfWeek.includes(cursor.getDay())) {
+      const currentIsoDate = cursor.toISOString().split('T')[0];
+      const success = await processSlot(currentIsoDate);
+      if (success) blockedCount++;
+      else conflictCount++;
+    }
+    // Next day
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return { blocked: blockedCount, conflicts: conflictCount };
 };
 
 /**

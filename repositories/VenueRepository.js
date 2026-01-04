@@ -29,6 +29,16 @@ export const getAllPolicies = async () => {
 };
 
 /**
+ * Get all available amenities
+ * 
+ * @returns {Promise<Array>} List of amenities
+ */
+export const getAllAmenities = async () => {
+    const [rows] = await connectDB.execute("SELECT * FROM amenities ORDER BY name");
+    return rows;
+};
+
+/**
  * Fetch all venues with complete details
  *
  * Retrieves all venues with aggregated information:
@@ -354,13 +364,44 @@ export const updateVenue = async (venueId, updates) => {
     if (fieldsToUpdate.length === 0) return false;
 
     // Add updated_at timestamp
-    fieldsToUpdate.push('updated_at = NOW()');
-    values.push(venueId);
+    if (fieldsToUpdate.length > 0) {
+        fieldsToUpdate.push('updated_at = NOW()');
+        values.push(venueId);
+    }
 
-    const sql = `UPDATE venues SET ${fieldsToUpdate.join(', ')} WHERE venue_id = ?`;
+    const conn = await connectDB.getConnection();
+    try {
+        await conn.beginTransaction();
 
-    const [result] = await connectDB.execute(sql, values);
-    return result.affectedRows > 0;
+        // 1. Update basic fields if any
+        if (fieldsToUpdate.length > 0) {
+            const sql = `UPDATE venues SET ${fieldsToUpdate.join(', ')} WHERE venue_id = ?`;
+            await conn.execute(sql, values);
+        }
+
+        // 2. Update Amenities if provided
+        if (updates.amenityIds) {
+            // Delete existing
+            await conn.execute("DELETE FROM venue_amenities WHERE venue_id = ?", [venueId]);
+
+            // Insert new
+            if (updates.amenityIds.length > 0) {
+                const amenityValues = updates.amenityIds.map((id) => [venueId, id]);
+                await conn.query(
+                    `INSERT INTO venue_amenities (venue_id, amenity_id) VALUES ?`,
+                    [amenityValues]
+                );
+            }
+        }
+
+        await conn.commit();
+        return true;
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally {
+        conn.release();
+    }
 };
 
 /**
@@ -411,6 +452,7 @@ export const findVenueById = async (venueId) => {
         v.price_per_hour,
         vi.image_url AS primary_image,
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        GROUP_CONCAT(DISTINCT a.amenity_id) AS amenity_ids,
         v.description,
         v.cancellation_policy_id,
         cp.name AS policy_name,
