@@ -15,6 +15,7 @@
 
 import {
   getAllVenues,
+  getAllAmenities,
   findMostBookedVenuesThisWeek,
   searchVenues,
   createVenue,
@@ -60,6 +61,20 @@ export const fetchAllVenues = async (req, res) => {
     res.json(venues);
   } catch (err) {
     console.error("Error fetching venues:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Fetch all available amenities
+ * GET /api/venues/amenities
+ */
+export const fetchAmenities = async (req, res) => {
+  try {
+    const amenities = await getAllAmenities();
+    res.json(amenities);
+  } catch (err) {
+    console.error("Error fetching amenities:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -191,7 +206,7 @@ export const update = async (req, res) => {
  */
 export const blockSlot = async (req, res) => {
   const { id } = req.params;
-  const { date, startTime, endTime, reason } = req.body;
+  const { date, startTime, endTime, reason, recurrence } = req.body;
 
   if (!date || !startTime || !endTime) {
     return res.status(400).json({ message: "Missing blocking details" });
@@ -205,20 +220,23 @@ export const blockSlot = async (req, res) => {
       return res.status(400).json({ message: "End time must be after start time" });
     }
 
-    // Check conflicts
-    const bookingStart = toMySQLDateTime(start);
-    const bookingEnd = toMySQLDateTime(end);
+    // Delegate to Service
+    const result = await blockVenueSlot(id, req.user.id, date, startTime, endTime, reason, recurrence);
 
-    const hasConflict = await BookingRepository.hasBookingConflict(id, bookingStart, bookingEnd);
-    if (hasConflict) {
-      return res.status(409).json({ message: "Slot already booked or blocked" });
+    if (recurrence && recurrence.type === 'recurring') {
+      res.status(201).json({
+        message: `Recurring block processed. Blocked: ${result.blocked}, Conflicts/Skipped: ${result.conflicts}`,
+        details: result
+      });
+    } else {
+      res.status(201).json({ message: "Slot blocked successfully" });
     }
-
-    await blockVenueSlot(id, req.user.id, bookingStart, bookingEnd, reason);
-    res.status(201).json({ message: "Slot blocked successfully" });
   } catch (err) {
     console.error("Error blocking slot:", err);
-    res.status(500).json({ message: "Server error" });
+    if (err.message === "Slot already booked or blocked") {
+      return res.status(409).json({ message: err.message });
+    }
+    res.status(500).json({ message: err.message || "Server error" });
   }
 };
 
