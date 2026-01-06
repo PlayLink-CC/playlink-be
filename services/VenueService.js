@@ -233,3 +233,17 @@ export const deleteVenue = async (venueId) => {
   // 3. Delete the venue
   return await venueRepository.deleteVenue(venueId);
 };
+
+/**
+ * Get reviews for a venue
+ */
+export const getVenueReviews = async (venueId) => {
+  return await venueRepository.findReviewsByVenueId(venueId);
+};
+
+/**
+ * Reply to a review
+ */
+export const replyToReview = async (reviewId, reply) => {
+  return await venueRepository.updateReviewReply(reviewId, reply);
+};

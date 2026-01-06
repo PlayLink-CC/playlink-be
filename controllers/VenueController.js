@@ -24,6 +24,8 @@ import {
   getVenuesByOwner,
   getVenueById,
   deleteVenue,
+  getVenueReviews,
+  replyToReview,
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
@@ -132,6 +134,22 @@ export const create = async (req, res) => {
 };
 
 /**
+ * GET /api/venues/:id/reviews
+ * 
+ * Get all reviews for a venue.
+ */
+export const fetchVenueReviews = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const reviews = await getVenueReviews(id);
+    res.json(reviews);
+  } catch (err) {
+    console.error("Error fetching reviews:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
  * POST /api/venues/:id/reviews
  * 
  * Submit a review for a venue. User must have a completed booking.
@@ -165,6 +183,35 @@ export const addReview = async (req, res) => {
     res.status(201).json({ message: "Review submitted successfully" });
   } catch (err) {
     console.error("Error creating review:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * POST /api/venues/:id/reviews/:reviewId/reply
+ * 
+ * Reply to a review (Owner only)
+ */
+export const postReply = async (req, res) => {
+  const { id: venueId, reviewId } = req.params;
+  const { reply } = req.body;
+  const ownerId = req.user.id;
+
+  try {
+    // Verify ownership
+    const venue = await VenueRepository.findVenueById(venueId);
+    if (!venue || venue.owner_id !== ownerId) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    if (!reply || !reply.trim()) {
+      return res.status(400).json({ message: "Reply cannot be empty" });
+    }
+
+    await replyToReview(reviewId, reply);
+    res.json({ message: "Reply posted successfully" });
+  } catch (err) {
+    console.error("Error posting reply:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
