@@ -44,6 +44,8 @@ router.put("/:id", authenticate, authorize(["VENUE_OWNER"]), VenueController.upd
 router.delete("/:id", authenticate, authorize(["VENUE_OWNER"]), VenueController.remove);
 router.post("/:id/block", authenticate, authorize(["VENUE_OWNER"]), VenueController.blockSlot);
 
+router.get("/:id/reviews", VenueController.fetchVenueReviews);
 router.post("/:id/reviews", authenticate, VenueController.addReview);
+router.post("/:id/reviews/:reviewId/reply", authenticate, authorize(["VENUE_OWNER"]), VenueController.postReply);
 
 export default router;

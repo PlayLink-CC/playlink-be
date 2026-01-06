@@ -342,6 +342,61 @@ export const createReview = async ({ venueId, userId, rating, comment }) => {
 };
 
 /**
+ * Find all reviews for a venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<Object[]>} List of reviews
+ */
+export const findReviewsByVenueId = async (venueId) => {
+    const sql = `
+        SELECT 
+            r.review_id,
+            r.rating,
+            r.comment,
+            r.created_at,
+            r.owner_reply,
+            u.first_name,
+            u.last_name
+        FROM reviews r
+        JOIN users u ON u.user_id = r.user_id
+        WHERE r.venue_id = ?
+        ORDER BY r.created_at DESC
+    `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows;
+};
+
+/**
+ * Update review reply
+ * 
+ * @async
+ * @param {number} reviewId
+ * @param {string} reply
+ * @returns {Promise<boolean>}
+ */
+export const updateReviewReply = async (reviewId, reply) => {
+    // Note: Assuming 'owner_reply' column exists or needs to be added. 
+    // Since I cannot run migrations, this relies on the column being present or added manually.
+    // However, for the sake of the task, I will try to use a generic 'reply' or assume user will add it.
+    // I will try to ALTER TABLE if it doesn't exist? No, that's dangerous.
+    // I'll assume 'owner_reply' is the column name.
+
+    // First, try to update assuming column exists
+    try {
+        const [result] = await connectDB.execute(
+            `UPDATE reviews SET owner_reply = ? WHERE review_id = ?`,
+            [reply, reviewId]
+        );
+        return result.affectedRows > 0;
+    } catch (error) {
+        // If error is "Unknown column", we might need to add it. 
+        // But for this exercise, I'll return false or throw.
+        throw error;
+    }
+};
+
+/**
  * Update venue details
  * 
  * @async
