@@ -10,6 +10,7 @@ import {
   cancelBooking,
   rescheduleBooking,
   getAvailableTimeSlots,
+  calculatePrice,
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -32,6 +33,10 @@ router.get("/owner", authMiddleware, authorize(['VENUE_OWNER']), getOwnerBooking
 router.get("/booked-slots/:venueId", getBookedSlots);
 
 // Get available slots
+// Get available slots
 router.get("/available-slots/:venueId", getAvailableTimeSlots);
+
+// Calculate Price
+router.post("/calculate-price", authMiddleware, authorize(['PLAYER']), calculatePrice);
 
 export default router;

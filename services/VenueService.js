@@ -177,17 +177,46 @@ export const calculateDynamicPrice = async (venue, date, time, hours) => {
   let total = Number(venue.price_per_hour) * Number(hours);
 
   // Fetch rules
-  const rules = await BookingRepository.getPricingRules(venue.venue_id);
+  const rules = await venueRepository.getPricingRules(venue.venue_id);
 
-  // Simple logic: check if booking time overlaps with rule
+  const bookingDateObj = createISTDate(date, "00:00");
+  const bookingDay = bookingDateObj.getDay(); // 0-6
   const bookingStartHour = parseInt(time.split(':')[0]);
 
   let maxMultiplier = 1.0;
 
   for (const rule of rules) {
+    // Check Day
+    if (rule.days_of_week) {
+      let days = rule.days_of_week;
+      if (typeof days === 'string') {
+        try {
+          days = JSON.parse(days);
+        } catch (e) {
+          days = [];
+        }
+      }
+
+      // Ensure days is an array
+      if (Array.isArray(days)) {
+        // If days array is empty, it means "Every Day" - so we DON'T skip.
+        // Only check inclusion if array is NOT empty.
+        if (days.length > 0) {
+          const numericDays = days.map(Number);
+          if (!numericDays.includes(bookingDay)) {
+            continue;
+          }
+        }
+      }
+    }
+
     const ruleStart = parseInt(rule.start_time.split(':')[0]);
     const ruleEnd = parseInt(rule.end_time.split(':')[0]);
 
+    // Simple overlap check (assuming booking is 1 hour blocks or checking start time only)
+    // To be more accurate we should check full range overlap, but user asked for "specific time period"
+    // Checking if start time falls in range is a good approximation for now or we check if ANY part of booking falls in range.
+    // For now, let's stick to start time.
     if (bookingStartHour >= ruleStart && bookingStartHour < ruleEnd) {
       if (Number(rule.multiplier) > maxMultiplier) {
         maxMultiplier = Number(rule.multiplier);
@@ -195,7 +224,29 @@ export const calculateDynamicPrice = async (venue, date, time, hours) => {
     }
   }
 
-  return total * maxMultiplier;
+  const finalPrice = total * maxMultiplier;
+  return finalPrice;
+};
+
+/**
+ * Add pricing rule
+ */
+export const addVenuePricingRule = async (data) => {
+  return await venueRepository.addPricingRule(data);
+};
+
+/**
+ * Get pricing rules
+ */
+export const getVenuePricingRules = async (venueId) => {
+  return await venueRepository.getPricingRules(venueId);
+};
+
+/**
+ * Delete pricing rule
+ */
+export const deleteVenuePricingRule = async (ruleId) => {
+  return await venueRepository.deletePricingRule(ruleId);
 };
 
 /**

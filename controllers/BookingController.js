@@ -602,6 +602,27 @@ export const rescheduleBooking = async (req, res) => {
 };
 
 /**
+ * POST /api/bookings/calculate-price
+ */
+export const calculatePrice = async (req, res) => {
+  const { venueId, date, time, hours } = req.body;
+  if (!venueId || !date || !time || !hours) {
+    return res.status(400).json({ message: "Missing details" });
+  }
+
+  try {
+    const venue = await BookingRepository.getVenueById(venueId);
+    if (!venue) return res.status(404).json({ message: "Venue not found" });
+
+    const totalAmount = await calculateDynamicPrice(venue, date, time, hours);
+    res.json({ totalAmount });
+  } catch (err) {
+    console.error("Error calculating price:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
  * GET /api/bookings/available-slots/:venueId
  * Query: date (YYYY-MM-DD), hours (number)
  */

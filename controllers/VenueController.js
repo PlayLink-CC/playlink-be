@@ -25,6 +25,9 @@ import {
   getVenueById,
   deleteVenue,
   getVenueReviews,
+  addVenuePricingRule,
+  getVenuePricingRules,
+  deleteVenuePricingRule,
   replyToReview,
   deleteVenueReview,
 } from "../services/VenueService.js";
@@ -374,6 +377,56 @@ export const deleteReview = async (req, res) => {
       return res.status(403).json({ message: err.message });
     }
     console.error("Error deleting review:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Pricing Rules
+ */
+export const addPricingRule = async (req, res) => {
+  const { id } = req.params;
+  const { name, startTime, endTime, multiplier, daysOfWeek } = req.body;
+
+  // Validate
+  if (!name || !startTime || !endTime || !multiplier) {
+    return res.status(400).json({ message: "Missing required fields" });
+  }
+
+  try {
+    const ruleId = await addVenuePricingRule({
+      venueId: id,
+      name,
+      startTime,
+      endTime,
+      multiplier,
+      daysOfWeek
+    });
+    res.status(201).json({ message: "Rule added", ruleId });
+  } catch (err) {
+    console.error("Error adding pricing rule:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getPricingRules = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const rules = await getVenuePricingRules(id);
+    res.json(rules);
+  } catch (err) {
+    console.error("Error fetching rules:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const deletePricingRule = async (req, res) => {
+  const { ruleId } = req.params;
+  try {
+    await deleteVenuePricingRule(ruleId);
+    res.json({ message: "Rule deleted" });
+  } catch (err) {
+    console.error("Error deleting rule:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
