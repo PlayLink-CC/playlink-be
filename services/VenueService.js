@@ -247,3 +247,14 @@ export const getVenueReviews = async (venueId) => {
 export const replyToReview = async (reviewId, reply) => {
   return await venueRepository.updateReviewReply(reviewId, reply);
 };
+
+/**
+ * Delete a review
+ */
+export const deleteVenueReview = async (reviewId, userId) => {
+  const deleted = await venueRepository.deleteReview(reviewId, userId);
+  if (!deleted) {
+    throw new Error("Review not found or unauthorized");
+  }
+  return true;
+};

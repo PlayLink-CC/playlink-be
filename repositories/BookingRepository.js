@@ -527,7 +527,7 @@ export const hasUserCompletedBooking = async (userId, venueId) => {
      FROM bookings
      WHERE created_by = ?
      AND venue_id = ?
-     AND status = 'COMPLETED'`, // Assuming 'COMPLETED' is the status for past bookings
+     AND (status = 'COMPLETED' OR (status = 'CONFIRMED' AND booking_end < NOW()))`,
     [userId, venueId]
   );
   return rows[0].count > 0;

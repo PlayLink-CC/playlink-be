@@ -352,12 +352,12 @@ export const findReviewsByVenueId = async (venueId) => {
     const sql = `
         SELECT 
             r.review_id,
+            r.user_id,
             r.rating,
             r.comment,
             r.created_at,
             r.owner_reply,
-            u.first_name,
-            u.last_name
+            u.full_name
         FROM reviews r
         JOIN users u ON u.user_id = r.user_id
         WHERE r.venue_id = ?
@@ -475,12 +475,17 @@ export const findVenuesByOwner = async (ownerId) => {
             v.city,
             v.price_per_hour,
             v.is_active,
-            vi.image_url AS primary_image
+            vi.image_url AS primary_image,
+            COALESCE(AVG(r.rating), 0) AS avg_rating,
+            COUNT(DISTINCT r.review_id) AS review_count
         FROM venues v
         LEFT JOIN venue_images vi 
             ON vi.venue_id = v.venue_id
             AND vi.is_primary = 1
+        LEFT JOIN reviews r
+            ON r.venue_id = v.venue_id
         WHERE v.owner_id = ?
+        GROUP BY v.venue_id, v.name, v.address, v.city, v.price_per_hour, v.is_active, vi.image_url
         ORDER BY v.created_at DESC
     `;
     const [rows] = await connectDB.execute(sql, [ownerId]);
@@ -512,7 +517,9 @@ export const findVenueById = async (venueId) => {
         v.cancellation_policy_id,
         cp.name AS policy_name,
         cp.refund_percentage,
-        cp.hours_before_start
+        cp.hours_before_start,
+        COALESCE(AVG(r.rating), 0) AS avg_rating,
+        COUNT(DISTINCT r.review_id) AS review_count
     FROM venues v
     LEFT JOIN venue_sports vs 
         ON vs.venue_id = v.venue_id
@@ -527,6 +534,8 @@ export const findVenueById = async (venueId) => {
         ON a.amenity_id = va.amenity_id
     LEFT JOIN cancellation_policies cp
         ON cp.policy_id = v.cancellation_policy_id
+    LEFT JOIN reviews r
+        ON r.venue_id = v.venue_id
     WHERE v.venue_id = ?
     GROUP BY 
         v.venue_id,
@@ -588,4 +597,16 @@ export const deleteVenue = async (venueId) => {
     } finally {
         conn.release();
     }
+};
+
+/**
+ * Delete a review
+ * 
+ * @async
+ * @param {number} reviewId 
+ * @returns {Promise<boolean>}
+ */
+export const deleteReview = async (reviewId, userId) => {
+    const [result] = await connectDB.execute("DELETE FROM reviews WHERE review_id = ? AND user_id = ?", [reviewId, userId]);
+    return result.affectedRows > 0;
 };

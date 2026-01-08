@@ -26,6 +26,7 @@ import {
   deleteVenue,
   getVenueReviews,
   replyToReview,
+  deleteVenueReview,
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
@@ -352,6 +353,52 @@ export const remove = async (req, res) => {
     if (err.code === 'ER_ROW_IS_REFERENCED_2') {
       return res.status(400).json({ message: "Cannot delete venue with existing bookings or data (FK Constraint)." });
     }
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * DELETE /api/venues/:id/reviews/:reviewId
+ * 
+ * Delete a review (Review Owner only)
+ */
+export const deleteReview = async (req, res) => {
+  const { reviewId } = req.params;
+  const userId = req.user.id;
+
+  try {
+    await deleteVenueReview(reviewId, userId);
+    res.json({ message: "Review deleted successfully" });
+  } catch (err) {
+    if (err.message === "Review not found or unauthorized") {
+      return res.status(403).json({ message: err.message });
+    }
+    console.error("Error deleting review:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * DELETE /api/venues/:id/reviews/:reviewId/reply
+ * 
+ * Delete a reply (Review Owner only)
+ */
+export const deleteReply = async (req, res) => {
+  const { id: venueId, reviewId } = req.params;
+  const ownerId = req.user.id;
+
+  try {
+    // Verify ownership
+    const venue = await VenueRepository.findVenueById(venueId);
+    if (!venue || venue.owner_id !== ownerId) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    // Pass null to delete/clear the reply
+    await replyToReview(reviewId, null);
+    res.json({ message: "Reply deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting reply:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
