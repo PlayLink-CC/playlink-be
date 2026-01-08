@@ -50,4 +50,9 @@ router.delete("/:id/reviews/:reviewId", authenticate, VenueController.deleteRevi
 router.post("/:id/reviews/:reviewId/reply", authenticate, authorize(["VENUE_OWNER"]), VenueController.postReply);
 router.delete("/:id/reviews/:reviewId/reply", authenticate, authorize(["VENUE_OWNER"]), VenueController.deleteReply);
 
+// Pricing Rules
+router.get("/:id/pricing-rules", VenueController.getPricingRules);
+router.post("/:id/pricing-rules", authenticate, authorize(["VENUE_OWNER"]), VenueController.addPricingRule);
+router.delete("/:id/pricing-rules/:ruleId", authenticate, authorize(["VENUE_OWNER"]), VenueController.deletePricingRule);
+
 export default router;

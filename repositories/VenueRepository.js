@@ -610,3 +610,31 @@ export const deleteReview = async (reviewId, userId) => {
     const [result] = await connectDB.execute("DELETE FROM reviews WHERE review_id = ? AND user_id = ?", [reviewId, userId]);
     return result.affectedRows > 0;
 };
+
+/**
+ * Add a pricing rule
+ */
+export const addPricingRule = async ({ venueId, name, startTime, endTime, multiplier, daysOfWeek }) => {
+    const [result] = await connectDB.execute(
+        `INSERT INTO venue_pricing_rules (venue_id, name, start_time, end_time, multiplier, days_of_week) 
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [venueId, name, startTime, endTime, multiplier, JSON.stringify(daysOfWeek)]
+    );
+    return result.insertId;
+};
+
+/**
+ * Get pricing rules for a venue
+ */
+export const getPricingRules = async (venueId) => {
+    const [rows] = await connectDB.execute("SELECT * FROM venue_pricing_rules WHERE venue_id = ?", [venueId]);
+    return rows;
+};
+
+/**
+ * Delete a pricing rule
+ */
+export const deletePricingRule = async (ruleId) => {
+    const [result] = await connectDB.execute("DELETE FROM venue_pricing_rules WHERE rule_id = ?", [ruleId]);
+    return result.affectedRows > 0;
+};
