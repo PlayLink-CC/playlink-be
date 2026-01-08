@@ -352,6 +352,7 @@ export const findReviewsByVenueId = async (venueId) => {
     const sql = `
         SELECT 
             r.review_id,
+            r.user_id,
             r.rating,
             r.comment,
             r.created_at,
@@ -596,4 +597,16 @@ export const deleteVenue = async (venueId) => {
     } finally {
         conn.release();
     }
+};
+
+/**
+ * Delete a review
+ * 
+ * @async
+ * @param {number} reviewId 
+ * @returns {Promise<boolean>}
+ */
+export const deleteReview = async (reviewId, userId) => {
+    const [result] = await connectDB.execute("DELETE FROM reviews WHERE review_id = ? AND user_id = ?", [reviewId, userId]);
+    return result.affectedRows > 0;
 };
