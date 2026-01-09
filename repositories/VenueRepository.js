@@ -263,6 +263,9 @@ export const createVenue = async (venueData) => {
             city,
             pricePerHour,
             cancellationPolicyId,
+            customCancellationPolicy,
+            customRefundPercentage,
+            customHoursBeforeStart,
             sportIds,
             amenityIds,
             imageUrls,
@@ -270,8 +273,8 @@ export const createVenue = async (venueData) => {
 
         // 1. Insert Venue
         const [result] = await conn.execute(
-            `INSERT INTO venues (owner_id, name, description, address, city, price_per_hour, cancellation_policy_id) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO venues (owner_id, name, description, address, city, price_per_hour, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 ownerId,
                 name,
@@ -279,7 +282,10 @@ export const createVenue = async (venueData) => {
                 address,
                 city,
                 pricePerHour,
-                cancellationPolicyId,
+                cancellationPolicyId || null,
+                customCancellationPolicy || null,
+                customRefundPercentage || null,
+                customHoursBeforeStart || null,
             ]
         );
         const venueId = result.insertId;
@@ -405,7 +411,7 @@ export const updateReviewReply = async (reviewId, reply) => {
  * @returns {Promise<boolean>} True if updated
  */
 export const updateVenue = async (venueId, updates) => {
-    const validFields = ['name', 'description', 'price_per_hour', 'address', 'city'];
+    const validFields = ['name', 'description', 'price_per_hour', 'address', 'city', 'cancellation_policy_id', 'custom_cancellation_policy', 'custom_refund_percentage', 'custom_hours_before_start'];
     const fieldsToUpdate = [];
     const values = [];
 
@@ -515,6 +521,9 @@ export const findVenueById = async (venueId) => {
         GROUP_CONCAT(DISTINCT a.amenity_id) AS amenity_ids,
         v.description,
         v.cancellation_policy_id,
+        v.custom_cancellation_policy,
+        v.custom_refund_percentage,
+        v.custom_hours_before_start,
         cp.name AS policy_name,
         cp.refund_percentage,
         cp.hours_before_start,
@@ -548,6 +557,9 @@ export const findVenueById = async (venueId) => {
         vi.image_url,
         v.description,
         v.cancellation_policy_id,
+        v.custom_cancellation_policy,
+        v.custom_refund_percentage,
+        v.custom_hours_before_start,
         policy_name,
         refund_percentage,
         hours_before_start

@@ -57,24 +57,42 @@ export const cancelBooking = async (bookingId, userId) => {
     // In split payments or point payments, 'paid_amount' might be partial or 0 (if valid points logic wasn't fully capturing value).
     // The refund should be based on the VALUE of the booking.
     const baseAmount = Number(booking.total_amount);
-    const policyHours = booking.hours_before_start || 0; // Default 0 if no policy
-    const refundPct = booking.refund_percentage || 0;
-
-    console.log(`[CancelBooking] ID:${bookingId} BaseAmount:${baseAmount} PolicyHours:${policyHours} RefundPct:${refundPct} HoursRemaining:${hoursRemaining}`);
-
+    // Step B: The Math
+    let policyHours = booking.hours_before_start || 0;
+    let refundPct = booking.refund_percentage || 0;
     let playerRefund = 0;
     let ownerRevenueCut = 0;
 
-    // Step B: The Math
+    // Override with custom policy if present on booking (snapshot)
+    if (booking.custom_refund_percentage !== null && booking.custom_refund_percentage !== undefined) {
+        refundPct = booking.custom_refund_percentage;
+        policyHours = booking.custom_hours_before_start || 0;
+        console.log(`[CancelBooking] Using Custom Booking Policy: Refund ${refundPct}% if > ${policyHours}hrs`);
+    } else if (booking.custom_cancellation_policy) {
+        // Fallback for legacy custom text policies (if any exist without structured data)
+        console.log(`[CancelBooking] Legacy Custom Policy (Text Only). Defaulting to 0% automated refund.`);
+        refundPct = 0;
+        policyHours = 0;
+    }
+
     if (hoursRemaining > policyHours) {
-        // Full Refund
+        // Full Refund (Before the cut-off window)
+        // Actually, wait. Standard Policy logic is:
+        // "Refund X% within Y hours".
+        // Usually it means:
+        // If > Y hours remaining: 100% Refund?
+        // Or is the policy "X% refund if cancelled MORE than Y hours before"?
+        // Let's check standard policy data.
+        // Example: "Refund 50% within 24 hours" usually means if you cancel *within* the last 24h, you get 50%. Before that you get 100%.
+        // The previous code had:
+        // if (hoursRemaining > policyHours) { playerRefund = baseAmount; } else { ... use refundPct ... }
+        // This implies: Outside the window = 100% refund. Inside the window = Policy % refund.
+
         playerRefund = baseAmount;
         ownerRevenueCut = 0;
     } else {
-        // Partial Refund (e.g. 90%)
-        // Partial Refund (e.g. 90%)
-        // player_refund = bookings.total_amount * (refund_percentage / 100)
-        // owner_revenue_cut = bookings.total_amount * (1 - (refund_percentage / 100))
+        // Inside the restricted window
+        // Apply the Refund Percentage
         const decimalRefund = Number(refundPct) / 100;
         playerRefund = baseAmount * decimalRefund;
         ownerRevenueCut = baseAmount * (1 - decimalRefund);
