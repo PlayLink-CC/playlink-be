@@ -112,6 +112,9 @@ export const createCheckoutSession = async (req, res) => {
             bookingEnd,
             totalAmount,
             cancellationPolicyId: venue.cancellation_policy_id,
+            customCancellationPolicy: venue.custom_cancellation_policy,
+            customRefundPercentage: venue.custom_refund_percentage,
+            customHoursBeforeStart: venue.custom_hours_before_start,
             pointsUsed: totalAmount, // Full points payment
             paidAmount: 0 // No cash/card paid
           });
@@ -205,7 +208,10 @@ export const createCheckoutSession = async (req, res) => {
         booking_start: bookingStart,
         booking_end: bookingEnd,
         total_amount: String(totalAmount),
-        cancellation_policy_id: String(venue.cancellation_policy_id),
+        cancellation_policy_id: String(venue.cancellation_policy_id || ""),
+        custom_cancellation_policy: venue.custom_cancellation_policy ? String(venue.custom_cancellation_policy).substring(0, 500) : "", // Truncate if too long for metadata
+        custom_refund_percentage: String(venue.custom_refund_percentage || ""),
+        custom_hours_before_start: String(venue.custom_hours_before_start || ""),
         invites: JSON.stringify(invites), // Store invites in metadata
         share_amount: String(shareAmount),
         points_to_deduct: String(pointsToDeduct),
@@ -251,7 +257,8 @@ export const handleCheckoutSuccess = async (req, res) => {
     // 2) Extract metadata
     const {
       venue_id, user_id, booking_start, booking_end,
-      total_amount, cancellation_policy_id,
+      total_amount, cancellation_policy_id, custom_cancellation_policy,
+      custom_refund_percentage, custom_hours_before_start,
       invites, share_amount, points_to_deduct,
       type, booking_id, owner_id // extract owner_id
     } = session.metadata;
@@ -322,7 +329,10 @@ export const handleCheckoutSuccess = async (req, res) => {
         bookingStart: booking_start,
         bookingEnd: booking_end,
         totalAmount: Number(total_amount),
-        cancellationPolicyId: cancellation_policy_id,
+        cancellationPolicyId: cancellation_policy_id ? Number(cancellation_policy_id) : null,
+        customCancellationPolicy: custom_cancellation_policy || null,
+        customRefundPercentage: custom_refund_percentage ? Number(custom_refund_percentage) : null,
+        customHoursBeforeStart: custom_hours_before_start ? Number(custom_hours_before_start) : null,
         pointsUsed: points,
         paidAmount: paidAmount
       });

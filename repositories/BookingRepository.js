@@ -34,7 +34,7 @@ import pool from "../config/dbconnection.js";
  */
 export const getVenueById = async (venueId) => {
   const [rows] = await pool.execute(
-    "SELECT venue_id, name, price_per_hour, cancellation_policy_id, owner_id FROM venues WHERE venue_id = ?",
+    "SELECT venue_id, name, price_per_hour, cancellation_policy_id, owner_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start FROM venues WHERE venue_id = ?",
     [venueId]
   );
   return rows[0] || null;
@@ -65,14 +65,17 @@ export const createBooking = async (conn, {
   bookingEnd,
   totalAmount,
   cancellationPolicyId,
+  customCancellationPolicy,
+  customRefundPercentage,
+  customHoursBeforeStart,
   pointsUsed = 0,
   paidAmount = 0
 }) => {
   const [result] = await conn.execute(
     `INSERT INTO bookings
-     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, points_used, paid_amount)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
-    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, pointsUsed || 0, paidAmount || 0]
+     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount)
+     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)`,
+    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0]
   );
 
   return result.insertId;
@@ -248,6 +251,9 @@ export const getBookingWithPolicy = async (bookingId) => {
   const [rows] = await pool.execute(
     `SELECT b.*,
             v.venue_id, v.owner_id,
+            v.custom_cancellation_policy AS venue_custom_policy,
+            v.custom_refund_percentage AS venue_refund_percentage,
+            v.custom_hours_before_start AS venue_hours_before_start,
             cp.policy_id, cp.name as policy_name, cp.refund_percentage, cp.hours_before_start
      FROM bookings b
      JOIN venues v ON b.venue_id = v.venue_id
@@ -320,6 +326,8 @@ export const getUserBookings = async (userId) => {
        b.status,
        b.points_used,
        b.paid_amount,
+       b.custom_refund_percentage,
+       b.custom_hours_before_start,
        v.name   AS venue_name,
        v.city   AS venue_city,
        v.address AS venue_address,
@@ -331,7 +339,7 @@ export const getUserBookings = async (userId) => {
      FROM booking_participants bp
      JOIN bookings b ON b.booking_id = bp.booking_id
      JOIN venues   v ON v.venue_id  = b.venue_id
-     LEFT JOIN cancellation_policies cp ON v.cancellation_policy_id = cp.policy_id
+     LEFT JOIN cancellation_policies cp ON COALESCE(b.cancellation_policy_id, v.cancellation_policy_id) = cp.policy_id
      WHERE bp.user_id = ?
      ORDER BY b.booking_start DESC`,
     [userId]
