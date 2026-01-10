@@ -23,8 +23,10 @@ export const cancelBooking = async (bookingId, userId) => {
         throw new Error("Booking not found");
     }
 
-    if (booking.created_by !== userId) {
-        throw new Error("Unauthorized: Only the booking creator can cancel.");
+    const isOwner = booking.owner_id === userId;
+
+    if (booking.created_by !== userId && !isOwner) {
+        throw new Error("Unauthorized: Only the booking creator or venue owner can cancel.");
     }
 
     if (booking.status === 'CANCELLED') {
@@ -49,7 +51,8 @@ export const cancelBooking = async (bookingId, userId) => {
     const start = new Date(booking.booking_start);
     const hoursRemaining = (start - now) / (1000 * 60 * 60);
 
-    if (hoursRemaining <= 0) {
+    // Only prevent cancellation if it's the PLAYER trying to cancel after start
+    if (!isOwner && hoursRemaining <= 0) {
         throw new Error("Cannot cancel a booking that has already started.");
     }
 
@@ -63,16 +66,23 @@ export const cancelBooking = async (bookingId, userId) => {
     let playerRefund = 0;
     let ownerRevenueCut = 0;
 
-    // Override with custom policy if present on booking (snapshot)
-    if (booking.custom_refund_percentage !== null && booking.custom_refund_percentage !== undefined) {
-        refundPct = booking.custom_refund_percentage;
-        policyHours = booking.custom_hours_before_start || 0;
-        console.log(`[CancelBooking] Using Custom Booking Policy: Refund ${refundPct}% if > ${policyHours}hrs`);
-    } else if (booking.custom_cancellation_policy) {
-        // Fallback for legacy custom text policies (if any exist without structured data)
-        console.log(`[CancelBooking] Legacy Custom Policy (Text Only). Defaulting to 0% automated refund.`);
-        refundPct = 0;
-        policyHours = 0;
+    if (isOwner) {
+        refundPct = 100;
+        playerRefund = baseAmount;
+        ownerRevenueCut = 0;
+    } else {
+        // PLAYER CANCELLATION
+        // Override with custom policy if present on booking (snapshot)
+        if (booking.custom_refund_percentage !== null && booking.custom_refund_percentage !== undefined) {
+            refundPct = booking.custom_refund_percentage;
+            policyHours = booking.custom_hours_before_start || 0;
+            console.log(`[CancelBooking] Using Custom Booking Policy: Refund ${refundPct}% if > ${policyHours}hrs`);
+        } else if (booking.custom_cancellation_policy) {
+            // Fallback for legacy custom text policies (if any exist without structured data)
+            console.log(`[CancelBooking] Legacy Custom Policy (Text Only). Defaulting to 0% automated refund.`);
+            refundPct = 0;
+            policyHours = 0;
+        }
     }
 
     if (hoursRemaining > policyHours) {
@@ -137,9 +147,12 @@ export const cancelBooking = async (bookingId, userId) => {
         const initiatorRefund = totalRefundPool - othersRefundTotal;
 
         if (initiatorRefund > 0) {
-            await WalletRepository.updateWalletBalance(conn, userId, initiatorRefund);
+            // FIX: Credit the refund to the Booking Creator (Customer), not necessarily the person cancelling (who might be the Owner)
+            const beneficiaryId = booking.created_by;
+
+            await WalletRepository.updateWalletBalance(conn, beneficiaryId, initiatorRefund);
             await WalletRepository.createTransaction(conn, {
-                userId,
+                userId: beneficiaryId,
                 amount: initiatorRefund,
                 type: 'CREDIT',
                 description: `Refund for Booking #${bookingId} (Initiator Share)`,
