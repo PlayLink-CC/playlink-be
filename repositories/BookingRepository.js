@@ -658,3 +658,31 @@ export const deleteVenueBookings = async (venueId) => {
     conn.release();
   }
 };
+
+/**
+ * Get bookings for a venue within a date range
+ *
+ * @async
+ * @param {number} venueId
+ * @param {string} startDate
+ * @param {string} endDate
+ * @returns {Promise<Array>}
+ */
+export const getBookingsForRange = async (venueId, startDate, endDate) => {
+  const [rows] = await pool.execute(
+    `SELECT b.booking_id, b.booking_start, b.booking_end, b.status, b.created_by, b.total_amount, b.paid_amount,
+            u.full_name AS customer_name, u.email AS customer_email
+     FROM bookings b
+     LEFT JOIN users u ON b.created_by = u.user_id
+     WHERE b.venue_id = ?
+     AND b.status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
+     AND (
+         (b.booking_start BETWEEN ? AND ?) OR
+         (b.booking_end BETWEEN ? AND ?) OR
+         (b.booking_start <= ? AND b.booking_end >= ?)
+     )
+     ORDER BY b.booking_start ASC`,
+    [venueId, startDate, endDate, startDate, endDate, startDate, endDate]
+  );
+  return rows;
+};

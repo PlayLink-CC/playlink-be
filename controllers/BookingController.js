@@ -694,3 +694,62 @@ export const getAvailableTimeSlots = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+/**
+ * GET /api/bookings/venue/:venueId/calendar
+ * Query: start (YYYY-MM-DD), end (YYYY-MM-DD)
+ */
+export const getVenueCalendarBookings = async (req, res) => {
+  const { venueId } = req.params;
+  const { start, end } = req.query;
+
+  if (!venueId || !start || !end) {
+    return res.status(400).json({ message: "Missing required parameters" });
+  }
+
+  try {
+    // Append end of day time to ensure range covers the full end date
+    const endDateWithTime = `${end} 23:59:59`;
+    const bookings = await BookingRepository.getBookingsForRange(venueId, start, endDateWithTime);
+    return res.json({ bookings });
+  } catch (err) {
+    console.error("Error fetching calendar bookings:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * POST /api/bookings/venue/:venueId/walk-in
+ * Body: date, time, hours
+ */
+export const createWalkInBooking = async (req, res) => {
+  const { venueId } = req.params;
+  const { date, time, hours, notes } = req.body;
+  const userId = req.user.id;
+
+  if (!venueId || !date || !time || !hours) {
+    return res.status(400).json({ message: "Missing required parameters" });
+  }
+
+  try {
+    const start = createISTDate(date, time);
+    const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
+    const startStr = toMySQLDateTime(start);
+    const endStr = toMySQLDateTime(end);
+
+    const hasConflict = await BookingRepository.hasBookingConflict(venueId, startStr, endStr);
+    if (hasConflict) {
+      return res.status(409).json({ message: "Slot already booked" });
+    }
+
+    // Create as BLOCKED for now, or we could create a 'WALK_IN' status if we add it to ENUM
+    // Using BLOCKED as per existing logic in Repo
+    const bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr);
+
+    return res.json({ success: true, bookingId, message: "Walk-in slot recorded" });
+
+  } catch (err) {
+    console.error("Error creating walk-in:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
