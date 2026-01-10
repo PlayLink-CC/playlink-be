@@ -11,6 +11,8 @@ import {
   rescheduleBooking,
   getAvailableTimeSlots,
   calculatePrice,
+  getVenueCalendarBookings,
+  createWalkInBooking,
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -34,7 +36,12 @@ router.get("/booked-slots/:venueId", getBookedSlots);
 
 // Get available slots
 // Get available slots
+// Get available slots
 router.get("/available-slots/:venueId", getAvailableTimeSlots);
+
+// Venue Calendar
+router.get("/venue/:venueId/calendar", authMiddleware, authorize(['VENUE_OWNER']), getVenueCalendarBookings);
+router.post("/venue/:venueId/walk-in", authMiddleware, authorize(['VENUE_OWNER']), createWalkInBooking);
 
 // Calculate Price
 router.post("/calculate-price", authMiddleware, authorize(['PLAYER']), calculatePrice);
