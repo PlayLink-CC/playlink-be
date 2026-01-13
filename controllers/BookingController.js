@@ -718,13 +718,9 @@ export const getVenueCalendarBookings = async (req, res) => {
   }
 };
 
-/**
- * POST /api/bookings/venue/:venueId/walk-in
- * Body: date, time, hours
- */
 export const createWalkInBooking = async (req, res) => {
   const { venueId } = req.params;
-  const { date, time, hours, notes } = req.body;
+  const { date, time, hours, notes, type, customerName, customerEmail } = req.body; // type: 'WALK_IN' or 'BLOCK'
   const userId = req.user.id;
 
   if (!venueId || !date || !time || !hours) {
@@ -742,14 +738,71 @@ export const createWalkInBooking = async (req, res) => {
       return res.status(409).json({ message: "Slot already booked" });
     }
 
-    // Create as BLOCKED for now, or we could create a 'WALK_IN' status if we add it to ENUM
-    // Using BLOCKED as per existing logic in Repo
-    const bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr);
+    let bookingId;
 
-    return res.json({ success: true, bookingId, message: "Walk-in slot recorded" });
+    if (type === 'WALK_IN') {
+      // Create a confirmed booking for Walk-in (essentially a manual admin booking)
+      // We need connection for transaction if we want to add participants etc, but usually walk-in is simple.
+      // However, BookingRepository.createBooking expects a connection object.
+      const pool = BookingRepository.getPool();
+      const conn = await pool.getConnection();
+
+      try {
+        await conn.beginTransaction();
+
+        // Fetch venue minimal info for defaults if needed (policy id)
+        const venue = await BookingRepository.getVenueById(venueId);
+
+        bookingId = await BookingRepository.createBooking(conn, {
+          venueId,
+          userId, // Owner created it
+          bookingStart: startStr,
+          bookingEnd: endStr,
+          totalAmount: 0, // Walk-in usually handles payment externally or we can calculate.
+          // For now, let's say 0 or we could calc price if needed. 
+          // Let's assume 0 for internal tracking unless specified.
+          cancellationPolicyId: venue?.cancellation_policy_id || 1,
+          pointsUsed: 0,
+          paidAmount: 0,
+          guestName: customerName,
+          guestEmail: customerEmail
+        });
+
+        // Set status to CONFIRMED
+        await BookingRepository.updateBookingStatus(conn, bookingId, 'CONFIRMED');
+
+        // Add minimal participant info (Owner?) or maybe a placeholder "Walk-in Customer" if we supported non-user participants.
+        // Currently DB enforces user_id foreign key? 
+        // If system requires user_id, we use the owner's ID (initiator).
+        // Maybe store customerName/Email in notes or a separate meta table if needed.
+        // For now, simple owner attribution is fine.
+
+        await BookingRepository.addBookingParticipant(conn, {
+          bookingId,
+          userId,
+          shareAmount: 0,
+          isInitiator: 1
+        });
+
+        await BookingRepository.updateParticipantsPaymentStatus(conn, bookingId, 'PAID'); // Assume paid externally
+
+        await conn.commit();
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+
+    } else {
+      // Default to BLOCK
+      bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr);
+    }
+
+    return res.json({ success: true, bookingId, message: type === 'WALK_IN' ? "Walk-in booking created" : "Slot blocked successfully" });
 
   } catch (err) {
-    console.error("Error creating walk-in:", err);
-    return res.status(500).json({ message: "Server error" });
+    console.error("Error creating walk-in/block:", err);
+    return res.status(500).json({ message: err.message || "Server error" });
   }
 };
