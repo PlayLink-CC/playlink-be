@@ -69,13 +69,15 @@ export const createBooking = async (conn, {
   customRefundPercentage,
   customHoursBeforeStart,
   pointsUsed = 0,
-  paidAmount = 0
+  paidAmount = 0,
+  guestName = null,
+  guestEmail = null
 }) => {
   const [result] = await conn.execute(
     `INSERT INTO bookings
-     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)`,
-    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0]
+     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount, guest_name, guest_email)
+     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0, guestName, guestEmail]
   );
 
   return result.insertId;
@@ -228,6 +230,8 @@ export const getBookingWithVenue = async (conn, bookingId) => {
   const [rows] = await conn.execute(
     `SELECT
       b.*,
+      b.guest_name,
+      b.guest_email,
       v.name AS venue_name,
       v.address,
       v.city
@@ -671,6 +675,7 @@ export const deleteVenueBookings = async (venueId) => {
 export const getBookingsForRange = async (venueId, startDate, endDate) => {
   const [rows] = await pool.execute(
     `SELECT b.booking_id, b.booking_start, b.booking_end, b.status, b.created_by, b.total_amount, b.paid_amount,
+            b.guest_name, b.guest_email,
             u.full_name AS customer_name, u.email AS customer_email
      FROM bookings b
      LEFT JOIN users u ON b.created_by = u.user_id
