@@ -691,3 +691,42 @@ export const getBookingsForRange = async (venueId, startDate, endDate) => {
   );
   return rows;
 };
+
+/**
+ * Get detailed revenue analytics for an owner
+ * 
+ * @param {number} ownerId 
+ * @returns {Promise<Object>} containing revenueByVenue and revenueByMonth
+ */
+export const getRevenueAnalytics = async (ownerId) => {
+  // Revenue by Venue
+  const [revenueByVenue] = await pool.execute(
+    `SELECT v.name as venue_name, COALESCE(SUM(b.total_amount), 0) as value
+     FROM venues v
+     LEFT JOIN bookings b ON b.venue_id = v.venue_id AND b.status IN ('CONFIRMED', 'COMPLETED')
+     WHERE v.owner_id = ?
+     GROUP BY v.venue_id, v.name HAVING value > 0`,
+    [ownerId]
+  );
+
+  // Monthly Revenue by Venue (Last 6 months + Current)
+  const [monthlyRevenue] = await pool.execute(
+    `SELECT 
+        v.name as venue_name, 
+        DATE_FORMAT(b.booking_start, '%Y-%m') as month, 
+        SUM(b.total_amount) as revenue
+     FROM bookings b
+     JOIN venues v ON b.venue_id = v.venue_id
+     WHERE v.owner_id = ? 
+     AND b.status IN ('CONFIRMED', 'COMPLETED')
+     AND b.booking_start >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+     GROUP BY v.venue_id, month
+     ORDER BY month ASC`,
+    [ownerId]
+  );
+
+  return {
+    revenueByVenue,
+    monthlyRevenue
+  };
+};
