@@ -19,3 +19,15 @@ export const getOwnerSummary = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+
+export const getOwnerDetailedAnalytics = async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+        const stats = await BookingRepository.getRevenueAnalytics(userId);
+        res.json(stats);
+    } catch (err) {
+        console.error("Error fetching detailed analytics:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
