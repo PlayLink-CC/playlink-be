@@ -104,12 +104,37 @@ export const addBookingParticipant = async (conn, {
   userId,
   shareAmount,
   isInitiator = 0,
+  guestEmail = null,
+  inviteToken = null
 }) => {
+  // If no userId, it's a guest invite -> status PENDING? Or ACCEPTED?
+  // User didn't specify status logic changes, but logically a guest hasn't 'Accepted' yet until they register/click.
+  // But existing users are auto-ACCEPTED in current logic (line 110).
+  // I will keep behavior consistent or just default to ACCEPTED/PENDING based on user existence?
+  // Let's assume PENDING for guests makes sense, but the prompt didn't ask for status changes. 
+  // I will just insert the fields.
+
   await conn.execute(
     `INSERT INTO booking_participants
-     (booking_id, user_id, share_amount, is_initiator, invite_status, payment_status)
-     VALUES (?, ?, ?, ?, 'ACCEPTED', 'PENDING')`,
-    [bookingId, userId, shareAmount, isInitiator]
+     (booking_id, user_id, share_amount, is_initiator, invite_status, payment_status, guest_email, invite_token)
+     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+    [bookingId, userId, shareAmount, isInitiator, 'ACCEPTED', guestEmail, inviteToken]
+  );
+};
+
+/**
+ * Link guest bookings to a newly registered user
+ * 
+ * @param {number} userId 
+ * @param {string} email 
+ */
+export const linkGuestBookings = async (userId, email) => {
+  // Update any participant records where guest_email matches and user_id is NULL
+  await pool.execute(
+    `UPDATE booking_participants 
+         SET user_id = ?, guest_email = NULL, invite_token = NULL 
+         WHERE guest_email = ? AND user_id IS NULL`,
+    [userId, email]
   );
 };
 
