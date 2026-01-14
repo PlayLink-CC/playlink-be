@@ -730,3 +730,112 @@ export const getRevenueAnalytics = async (ownerId) => {
     monthlyRevenue
   };
 };
+
+/**
+ * Get revenue report based on interval
+ * 
+ * @param {number} ownerId 
+ * @param {Object} filters
+ * @param {string} filters.interval - 'daily', 'weekly', 'monthly'
+ * @param {number} [filters.venueId] - Optional specific venue
+ * @returns {Promise<Array>}
+ */
+export const getRevenueReport = async (ownerId, { interval, venueId, startDate, endDate }) => {
+  let groupByString = "";
+  let dateFilter = "";
+  let selectString = "";
+  const params = [ownerId]; // Init params with ownerId
+
+  // Determine grouping based on interval
+  switch (interval) {
+    case 'daily':
+      // Includes Day Name e.g., '2023-10-25 (Wed)'
+      selectString = "DATE_FORMAT(booking_start, '%Y-%m-%d (%a)') as label";
+      groupByString = "DATE(booking_start)";
+      break;
+    case 'weekly':
+      selectString = "CONCAT('Week ', WEEK(booking_start, 1), ' - ', YEAR(booking_start)) as label";
+      groupByString = "YEARWEEK(booking_start, 1)";
+      break;
+    case 'monthly':
+    default:
+      selectString = "DATE_FORMAT(booking_start, '%Y-%m') as label";
+      groupByString = "DATE_FORMAT(booking_start, '%Y-%m')";
+      break;
+  }
+
+  // Determine Date Filter
+  if (startDate && endDate) {
+    dateFilter = "booking_start BETWEEN ? AND ?";
+    params.push(startDate, endDate);
+  } else {
+    // Defaults if no range provided
+    switch (interval) {
+      case 'daily':
+        dateFilter = "booking_start >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+        break;
+      case 'weekly':
+        dateFilter = "booking_start >= DATE_SUB(CURDATE(), INTERVAL 12 WEEK)";
+        break;
+      case 'monthly':
+        dateFilter = "booking_start >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)";
+        break;
+    }
+  }
+
+  // Base query construction
+  let query = `
+    SELECT 
+      ${selectString},
+      v.name as venue_name,
+      SUM(total_amount) as revenue,
+      COUNT(*) as booking_count
+    FROM bookings b
+    JOIN venues v ON b.venue_id = v.venue_id
+    WHERE v.owner_id = ?
+    AND b.status IN ('CONFIRMED', 'COMPLETED')
+    AND ${dateFilter}
+  `;
+
+  // Add venue filter if specific venue selected
+  if (venueId) {
+    query += " AND b.venue_id = ?";
+    params.push(venueId);
+  }
+
+  // Always group by date AND venue so we get breakdown
+  query += ` GROUP BY ${groupByString}, v.name ORDER BY MIN(booking_start) ASC`;
+
+  const [rows] = await pool.execute(query, params);
+  return rows;
+};
+
+export const getPeakBookingHours = async (ownerId, startDate, endDate) => {
+  let dateFilter = "";
+  const params = [ownerId];
+
+  if (startDate && endDate) {
+    dateFilter = "AND booking_start BETWEEN ? AND ?";
+    params.push(startDate, endDate);
+  } else {
+    // Default to last 30 days if not provided
+    dateFilter = "AND booking_start >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+  }
+
+  const query = `
+      SELECT 
+        HOUR(booking_start) as hour_of_day,
+        v.name as venue_name,
+        CASE WHEN DAYOFWEEK(booking_start) IN (1, 7) THEN 'weekend' ELSE 'weekday' END as day_type,
+        COUNT(*) as booking_count
+      FROM bookings b
+      JOIN venues v ON b.venue_id = v.venue_id
+      WHERE v.owner_id = ?
+      AND b.status IN ('CONFIRMED', 'COMPLETED')
+      ${dateFilter}
+      GROUP BY HOUR(booking_start), v.name, day_type
+      ORDER BY hour_of_day ASC
+    `;
+  const [rows] = await pool.execute(query, params);
+  return rows;
+};
