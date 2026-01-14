@@ -29,10 +29,14 @@ export const calculateShares = (totalAmount, participantCount) => {
     return Math.round((totalAmount / totalPeople) * 100) / 100;
 };
 
+import { randomUUID } from 'crypto';
+import * as EmailUtil from "../utils/emailUtil.js";
+
 /**
  * Setup Booking Splits
  * 
  * Adds invited users as participants to the booking.
+ * Handles both registered users and guest invites.
  * 
  * @param {number} bookingId 
  * @param {number} initiatorId 
@@ -45,26 +49,17 @@ export const setupBookingSplits = async (bookingId, initiatorId, inviteeEmails, 
     const conn = externalConn || await pool.getConnection();
 
     try {
-        // Only manage transaction if we own the connection
         if (!externalConn) {
             await conn.beginTransaction();
         }
 
         // 1. Resolve Emails to User IDs
-        const users = await UserRepository.findIdsByEmails(inviteeEmails);
+        const existingUsers = await UserRepository.findIdsByEmails(inviteeEmails);
+        const existingEmails = new Set(existingUsers.map(u => u.email));
 
-        // 2. Add each user as a participant
-        for (const user of users) {
-            // Prevent adding initiator again if they are already added (logic in controller might handle this, but safe to check)
+        // 2. Add Existing Users
+        for (const user of existingUsers) {
             if (user.user_id === initiatorId) continue;
-
-            const existing = await BookingRepository.getBookingParticipant(conn, bookingId, user.user_id);
-            // We need getBookingParticipant to avoid duplicates if re-running? 
-            // Or just try/catch unique constraint?
-            // Since we are in a fresh booking creation flow, unlikely to have duplicates unless email list has dupes.
-            // We'll trust findIdsByEmails returns unique users if we didn't handle that?
-            // Actually, let's just insert. If error, we catch it?
-            // But existing logic didn't check.
 
             await BookingRepository.addBookingParticipant(conn, {
                 bookingId,
@@ -74,7 +69,40 @@ export const setupBookingSplits = async (bookingId, initiatorId, inviteeEmails, 
             });
         }
 
-        // 3. Update Initiator's share amount
+        // 3. Handle Guest Users (Emails not found in DB)
+        const guestEmails = inviteeEmails.filter(email => !existingEmails.has(email));
+
+        for (const email of guestEmails) {
+            const token = randomUUID(); // Generate unique token
+
+            await BookingRepository.addBookingParticipant(conn, {
+                bookingId,
+                userId: null,
+                shareAmount: shareAmount,
+                isInitiator: 0,
+                guestEmail: email,
+                inviteToken: token
+            });
+
+            // Send Invitation Email
+            // Note: Sending email inside transaction/loop might be slow but ensuring DB consistency first is key.
+            // Ideally should queue this, but for now we await or fire-and-forget?
+            // User requested "Trigger an email invitation".
+            // We'll fire and forget to not block transaction too much, or await if critical.
+            // Let's await for reliability in this scope.
+            try {
+                // Get initiator name for better email context? We only have ID here.
+                // We'll pass generic name or fetch it? 
+                // For performance, let's just pass "A friend" or fetch it once above if needed.
+                // But simplified:
+                await EmailUtil.sendInvitationEmail(email, token);
+            } catch (e) {
+                console.error(`Failed to send invite email to ${email}`, e);
+                // Continue transaction? Yes, participant is added.
+            }
+        }
+
+        // 4. Update Initiator's share amount
         await conn.execute(
             "UPDATE booking_participants SET share_amount = ? WHERE booking_id = ? AND user_id = ?",
             [shareAmount, bookingId, initiatorId]

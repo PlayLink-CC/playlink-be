@@ -91,6 +91,8 @@ export const logInUser = async (email, plainPassword) => {
   };
 };
 
+import * as bookingRepository from "../repositories/BookingRepository.js";
+
 /**
  * Register a new user
  *
@@ -129,6 +131,14 @@ export const registerUser = async ({
     phone,
     accountType,
   });
+
+  // Link any pending guest bookings/splits to this new user
+  try {
+    await bookingRepository.linkGuestBookings(newUser.user_id, newUser.email);
+  } catch (err) {
+    console.error("Error linking guest bookings during registration:", err);
+    // Don't fail registration if linking fails, just log logic error
+  }
 
   return {
     id: newUser.user_id,
