@@ -592,6 +592,26 @@ export const hasUserCompletedBooking = async (userId, venueId) => {
 };
 
 /**
+ * Get the most frequently booked sports for a user
+ * 
+ * @async
+ * @param {number} userId 
+ * @returns {Promise<number[]>} Array of sport IDs
+ */
+export const getUserPreferredSports = async (userId) => {
+  const [rows] = await pool.execute(
+    `SELECT sport_id, COUNT(*) as count 
+     FROM bookings 
+     WHERE created_by = ? AND sport_id IS NOT NULL
+     GROUP BY sport_id 
+     ORDER BY count DESC 
+     LIMIT 3`,
+    [userId]
+  );
+  return rows.map(r => r.sport_id);
+};
+
+/**
  * Get database pool connection
  *
  * Returns the connection pool for transaction management.

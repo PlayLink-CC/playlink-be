@@ -71,6 +71,7 @@ export const createToken = (user) => {
     email: user.email,
     accountType: user.accountType,
     fullName: user.fullName,
+    city: user.city,
   };
 
   return sign(payload);

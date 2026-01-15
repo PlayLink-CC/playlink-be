@@ -111,6 +111,60 @@ export const fetchTopWeeklyVenues = async (req, res) => {
 };
 
 /**
+ * Get venue recommendations for the user
+ * 
+ * @async
+ * @route GET /api/venues/recommendations
+ */
+export const getRecommendations = async (req, res) => {
+  try {
+    const city = req.query.city || (req.user ? req.user.city : null);
+    const userId = req.user ? req.user.id : null;
+
+    let preferredSports = [];
+    if (userId) {
+      preferredSports = await BookingRepository.getUserPreferredSports(userId);
+    }
+
+    if (!city) {
+      // Fallback to trending venues if no city available
+      const venues = await VenueRepository.findMostBookedVenuesThisWeek();
+      return res.json({ venues, type: 'trending', message: "Recommended for you" });
+    }
+
+    let venues = [];
+    let recType = 'city';
+
+    if (preferredSports.length > 0) {
+      // Try to find venues matching city AND preferred sports
+      venues = await VenueRepository.findVenuesBySportsAndCity(preferredSports, city);
+      if (venues.length > 0) {
+        recType = 'personalized';
+      } else {
+        // If no matching sports in that city, fallback to just city
+        venues = await VenueRepository.findVenuesByCity(city);
+      }
+    } else {
+      venues = await VenueRepository.findVenuesByCity(city);
+    }
+
+    // If not enough venues in the city, backfill with trending
+    if (venues.length < 2) {
+      const trending = await VenueRepository.findMostBookedVenuesThisWeek();
+      // Filter out those already in 'venues'
+      const filteredTrending = trending.filter(t => !venues.some(v => v.venue_id === t.venue_id));
+      const combined = [...venues, ...filteredTrending].slice(0, 4);
+      return res.json({ venues: combined, type: venues.length > 0 ? 'mixed' : 'trending', city });
+    }
+
+    res.json({ venues, type: recType, city });
+  } catch (err) {
+    console.error("Error fetching recommendations:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
  * Create a new venue
  *
  * @async

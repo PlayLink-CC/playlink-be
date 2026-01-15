@@ -91,25 +91,105 @@ export const findAllVenues = async () => {
 };
 
 /**
+ * Fetch venues in a specific city
+ * 
+ * @async
+ * @param {string} city 
+ * @param {number} limit 
+ */
+export const findVenuesByCity = async (city, limit = 4) => {
+    const sql = `
+    SELECT 
+        v.venue_id,
+        v.name AS venue_name,
+        CONCAT_WS(', ', v.address, v.city) AS location,
+        GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
+        v.price_per_hour,
+        vi.image_url AS primary_image,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        v.description
+    FROM venues v
+    LEFT JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
+    LEFT JOIN court_sports cs ON cs.court_id = c.court_id
+    LEFT JOIN sports s ON s.sport_id = cs.sport_id
+    LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
+    WHERE v.city = ? AND v.is_active = 1
+    GROUP BY 
+        v.venue_id,
+        v.name,
+        location,
+        v.price_per_hour,
+        vi.image_url,
+        v.description
+    LIMIT ?
+  `;
+
+    const [rows] = await connectDB.execute(sql, [city, limit]);
+    return rows;
+};
+
+/**
+ * Fetch venues that support specific sports in a specific city
+ * 
+ * @async
+ * @param {number[]} sportIds 
+ * @param {string} city 
+ * @param {number} limit 
+ */
+export const findVenuesBySportsAndCity = async (sportIds, city, limit = 4) => {
+    if (!sportIds || sportIds.length === 0) return findVenuesByCity(city, limit);
+
+    const placeholders = sportIds.map(() => '?').join(',');
+    const sql = `
+    SELECT 
+        v.venue_id,
+        v.name AS venue_name,
+        CONCAT_WS(', ', v.address, v.city) AS location,
+        GROUP_CONCAT(DISTINCT s.name ORDER BY s.name) AS court_types,
+        v.price_per_hour,
+        vi.image_url AS primary_image,
+        GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
+        v.description
+    FROM venues v
+    JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
+    JOIN court_sports cs ON cs.court_id = c.court_id
+    JOIN sports s ON s.sport_id = cs.sport_id
+    LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
+    WHERE v.city = ? AND v.is_active = 1 AND s.sport_id IN (${placeholders})
+    GROUP BY 
+        v.venue_id,
+        v.name,
+        location,
+        v.price_per_hour,
+        vi.image_url,
+        v.description
+    ORDER BY FIELD(s.sport_id, ${placeholders}) -- Prioritize by frequency in history
+    LIMIT ?
+  `;
+
+    const [rows] = await connectDB.execute(sql, [city, ...sportIds, ...sportIds, limit]);
+    return rows;
+};
+
+/**
  * Fetch top 4 most booked venues from the past 7 days
  *
- * Retrieves only active venues with booking counts from the
- * last 7 days, ordered by popularity (most booked first).
- *
- * Considers only confirmed and completed bookings.
- *
  * @async
- * @returns {Promise<Object[]>} Array of top 4 venues
- * @returns {number} rows[].venue_id - Venue ID
- * @returns {string} rows[].venue_name - Venue name
- * @returns {string} rows[].location - Address and city
- * @returns {number} rows[].price_per_hour - Hourly rate
- * @returns {string} rows[].primary_image - URL of main image
- * @returns {string} rows[].amenities - Comma-separated amenity list
- * @returns {string} rows[].court_types - Comma-separated sports
- * @returns {string} rows[].description - Venue description
- * @returns {number} rows[].bookings_this_week - Number of bookings
- * @throws {Error} Database connection error
+ * @returns { Promise < Object[] >} Array of top 4 venues
+ * @returns { number } rows[].venue_id - Venue ID
+ * @returns { string } rows[].venue_name - Venue name
+ * @returns { string } rows[].location - Address and city
+ * @returns { number } rows[].price_per_hour - Hourly rate
+ * @returns { string } rows[].primary_image - URL of main image
+ * @returns { string } rows[].amenities - Comma - separated amenity list
+ * @returns { string } rows[].court_types - Comma - separated sports
+ * @returns { string } rows[].description - Venue description
+ * @returns { number } rows[].bookings_this_week - Number of bookings
+ * @throws { Error } Database connection error
  */
 export const findMostBookedVenuesThisWeek = async () => {
     const sql = `

@@ -14,6 +14,7 @@
  */
 
 import * as userRepository from "../repositories/UserRepository.js";
+import * as NotificationRepository from "../repositories/NotificationRepository.js";
 import bcrypt from "bcryptjs";
 
 /**
@@ -41,6 +42,7 @@ export const getUsers = async () => {
     fullName: u.full_name,
     email: u.email,
     phone: u.phone,
+    city: u.city,
     accountType: u.account_type,
     createdAt: u.created_at,
     updatedAt: u.updated_at,
@@ -85,6 +87,7 @@ export const logInUser = async (email, plainPassword) => {
     fullName: user.full_name,
     email: user.email,
     phone: user.phone,
+    city: user.city,
     accountType: user.account_type,
     createdAt: user.created_at,
     updatedAt: user.updated_at,
@@ -114,6 +117,7 @@ export const registerUser = async ({
   email,
   plainPassword,
   phone,
+  city,
   accountType = "PLAYER",
 }) => {
   const existing = await userRepository.findByEmail(email);
@@ -129,6 +133,7 @@ export const registerUser = async ({
     email,
     passwordHash,
     phone,
+    city,
     accountType,
   });
 
@@ -140,11 +145,31 @@ export const registerUser = async ({
     // Don't fail registration if linking fails, just log logic error
   }
 
+  // Personalization for Venue Owners: Notify nearby owners if a new owner joins
+  if (accountType === "VENUE_OWNER" && city) {
+    try {
+      const nearbyOwners = await userRepository.findOwnersByCity(city, newUser.user_id);
+
+      const notificationPromises = nearbyOwners.map(owner =>
+        NotificationRepository.createNotification(
+          owner.user_id,
+          `A new sports venue owner has joined ${city}! Keep an eye on your local competition.`,
+          "NEW_COMPETITOR"
+        )
+      );
+
+      await Promise.all(notificationPromises);
+    } catch (err) {
+      console.error("Error sending competitor notifications:", err);
+    }
+  }
+
   return {
     id: newUser.user_id,
     fullName: newUser.full_name,
     email: newUser.email,
     phone: newUser.phone,
+    city: newUser.city,
     accountType: newUser.account_type,
     createdAt: newUser.created_at,
     updatedAt: newUser.updated_at,

@@ -13,7 +13,7 @@
 
 import express from "express";
 import * as VenueController from "../controllers/VenueController.js";
-import { authenticate, authorize } from "../middleware/auth.js";
+import { authenticate, authorize, optionalAuthenticate } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -29,6 +29,12 @@ router.get("/", VenueController.fetchAllVenues);
  * Public endpoint to get the top 4 most booked venues in the last 7 days
  */
 router.get("/top-weekly", VenueController.fetchTopWeeklyVenues);
+
+/**
+ * GET /venues/recommendations
+ * Recommends venues based on user's city
+ */
+router.get("/recommendations", optionalAuthenticate, VenueController.getRecommendations);
 
 /**
  * POST /venues

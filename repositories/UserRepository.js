@@ -32,7 +32,7 @@ import connectDB from "../config/dbconnection.js";
  * @throws {Error} Database connection error
  */
 export const findAll = async () => {
-  const sql = `SELECT user_id, full_name, email, phone, account_type, created_at, updated_at FROM users`;
+  const sql = `SELECT user_id, full_name, email, phone, city, account_type, created_at, updated_at FROM users`;
   const [rows] = await connectDB.execute(sql);
   return rows;
 };
@@ -80,11 +80,12 @@ export const createUser = async ({
   email,
   passwordHash,
   phone,
+  city,
   accountType,
 }) => {
   const insertSql = `
-    INSERT INTO users (full_name, email, password_hash, phone, account_type)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO users (full_name, email, password_hash, phone, city, account_type)
+    VALUES (?, ?, ?, ?, ?, ?)
   `;
 
   const [result] = await connectDB.execute(insertSql, [
@@ -92,13 +93,14 @@ export const createUser = async ({
     email,
     passwordHash,
     phone ?? null,
+    city ?? null,
     accountType,
   ]);
 
   const newUserId = result.insertId;
 
   const selectSql = `
-    SELECT user_id, full_name, email, phone, account_type, created_at, updated_at
+    SELECT user_id, full_name, email, phone, city, account_type, created_at, updated_at
     FROM users
     WHERE user_id = ?
   `;
@@ -143,5 +145,24 @@ export const findIdsByEmails = async (emails) => {
   const sql = `SELECT user_id, email FROM users WHERE email IN (${placeholders})`;
 
   const [rows] = await connectDB.execute(sql, emails);
+  return rows;
+};
+
+/**
+ * Find all venue owners in a specific city
+ * 
+ * @param {string} city 
+ * @param {number} excludeUserId - Optionally exclude a user ID
+ */
+export const findOwnersByCity = async (city, excludeUserId = null) => {
+  let sql = `SELECT user_id FROM users WHERE city = ? AND account_type = 'VENUE_OWNER'`;
+  const params = [city];
+
+  if (excludeUserId) {
+    sql += ` AND user_id != ?`;
+    params.push(excludeUserId);
+  }
+
+  const [rows] = await connectDB.execute(sql, params);
   return rows;
 };
