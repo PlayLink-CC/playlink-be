@@ -15,6 +15,7 @@
 
 import * as venueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
+import * as BookingService from "./BookingService.js";
 import { createISTDate, toMySQLDateTime } from "../utils/dateUtil.js";
 
 /**
@@ -115,7 +116,7 @@ export const updateVenue = async (venueId, updates) => {
 /**
  * Block a venue slot (Single or Recurring)
  */
-export const blockVenueSlot = async (venueId, userId, dateStr, startTime, endTime, reason, recurrence) => {
+export const blockVenueSlot = async (venueId, userId, dateStr, startTime, endTime, reason, recurrence, sportId = null) => {
   let blockedCount = 0;
   let conflictCount = 0;
 
@@ -126,9 +127,16 @@ export const blockVenueSlot = async (venueId, userId, dateStr, startTime, endTim
     const sSql = toMySQLDateTime(start);
     const eSql = toMySQLDateTime(end);
 
-    const hasConflict = await BookingRepository.hasBookingConflict(venueId, sSql, eSql);
+    // Find a specific court if sportId is provided
+    let availableCourtId = null;
+    if (sportId) {
+      availableCourtId = await BookingService.findAvailableCourt(venueId, sSql, eSql, sportId);
+      if (!availableCourtId) return false; // No available court for this sport
+    }
+
+    const hasConflict = await BookingRepository.hasBookingConflict(venueId, sSql, eSql, availableCourtId);
     if (!hasConflict) {
-      await BookingRepository.createBlock(venueId, userId, sSql, eSql, reason);
+      await BookingRepository.createBlock(venueId, userId, sSql, eSql, availableCourtId, sportId);
       return true;
     }
     return false;

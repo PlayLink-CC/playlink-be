@@ -697,7 +697,7 @@ export const getVenueCalendarBookings = async (req, res) => {
 
 export const createWalkInBooking = async (req, res) => {
   const { venueId } = req.params;
-  const { date, time, hours, notes, type, customerName, customerEmail } = req.body; // type: 'WALK_IN' or 'BLOCK'
+  const { date, time, hours, notes, type, customerName, customerEmail, sportId } = req.body; // type: 'WALK_IN' or 'BLOCK'
   const userId = req.user.id;
 
   if (!venueId || !date || !time || !hours) {
@@ -710,7 +710,15 @@ export const createWalkInBooking = async (req, res) => {
     const startStr = toMySQLDateTime(start);
     const endStr = toMySQLDateTime(end);
 
-    const hasConflict = await BookingRepository.hasBookingConflict(venueId, startStr, endStr);
+    // Find a court if sportId is provided, otherwise it's a legacy venue-wide block
+    const availableCourtId = sportId ? await BookingService.findAvailableCourt(venueId, startStr, endStr, sportId) : null;
+
+    if (sportId && !availableCourtId) {
+      return res.status(409).json({ message: "No courts available for this sport at the selected time" });
+    }
+
+    // Double check conflict on specific court (or venue-wide)
+    const hasConflict = await BookingRepository.hasBookingConflict(venueId, startStr, endStr, availableCourtId);
     if (hasConflict) {
       return res.status(409).json({ message: "Slot already booked" });
     }
@@ -718,26 +726,22 @@ export const createWalkInBooking = async (req, res) => {
     let bookingId;
 
     if (type === 'WALK_IN') {
-      // Create a confirmed booking for Walk-in (essentially a manual admin booking)
-      // We need connection for transaction if we want to add participants etc, but usually walk-in is simple.
-      // However, BookingRepository.createBooking expects a connection object.
       const pool = BookingRepository.getPool();
       const conn = await pool.getConnection();
 
       try {
         await conn.beginTransaction();
 
-        // Fetch venue minimal info for defaults if needed (policy id)
         const venue = await BookingRepository.getVenueById(venueId);
 
         bookingId = await BookingRepository.createBooking(conn, {
           venueId,
-          userId, // Owner created it
+          userId,
+          courtId: availableCourtId,
+          sportId: sportId || null,
           bookingStart: startStr,
           bookingEnd: endStr,
-          totalAmount: 0, // Walk-in usually handles payment externally or we can calculate.
-          // For now, let's say 0 or we could calc price if needed. 
-          // Let's assume 0 for internal tracking unless specified.
+          totalAmount: 0,
           cancellationPolicyId: venue?.cancellation_policy_id || 1,
           pointsUsed: 0,
           paidAmount: 0,
@@ -773,7 +777,7 @@ export const createWalkInBooking = async (req, res) => {
 
     } else {
       // Default to BLOCK
-      bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr);
+      bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr, availableCourtId, sportId);
     }
 
     return res.json({ success: true, bookingId, message: type === 'WALK_IN' ? "Walk-in booking created" : "Slot blocked successfully" });

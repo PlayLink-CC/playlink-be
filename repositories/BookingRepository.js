@@ -378,12 +378,12 @@ export const getUserBookings = async (userId) => {
   return rows;
 };
 
-export const createBlock = async (venueId, userId, startTime, endTime) => {
+export const createBlock = async (venueId, userId, startTime, endTime, courtId = null, sportId = null) => {
   const sql = `
-        INSERT INTO bookings (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
-        VALUES (?, ?, ?, ?, 0, 'BLOCKED', 1)
+        INSERT INTO bookings (venue_id, court_id, sport_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'BLOCKED', 1)
     `;
-  const [result] = await pool.execute(sql, [venueId, userId, startTime, endTime]);
+  const [result] = await pool.execute(sql, [venueId, courtId, sportId, userId, startTime, endTime]);
   return result.insertId;
 };
 
@@ -511,10 +511,14 @@ export const getOwnerBookings = async (ownerId) => {
        b.created_at,
        v.name AS venue_name,
        u.full_name AS customer_name,
-       u.email AS customer_email
+       u.email AS customer_email,
+       s.name AS sport_name,
+       c.name AS court_name
      FROM bookings b
      JOIN venues v ON b.venue_id = v.venue_id
      LEFT JOIN users u ON b.created_by = u.user_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      WHERE v.owner_id = ?
      ORDER BY b.booking_start DESC`,
     [ownerId]
@@ -717,10 +721,13 @@ export const deleteVenueBookings = async (venueId) => {
 export const getBookingsForRange = async (venueId, startDate, endDate) => {
   const [rows] = await pool.execute(
     `SELECT b.booking_id, b.booking_start, b.booking_end, b.status, b.created_by, b.total_amount, b.paid_amount,
-            b.guest_name, b.guest_email,
-            u.full_name AS customer_name, u.email AS customer_email
+            b.guest_name, b.guest_email, b.sport_id, b.court_id,
+            u.full_name AS customer_name, u.email AS customer_email,
+            s.name AS sport_name, c.name AS court_name
      FROM bookings b
      LEFT JOIN users u ON b.created_by = u.user_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      WHERE b.venue_id = ?
      AND b.status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
      AND (

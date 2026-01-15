@@ -589,6 +589,22 @@ export const findVenueById = async (venueId) => {
  * @returns {Promise<boolean>} True if deleted
  */
 /**
+ * Get sports supported by a venue
+ * @param {number} venueId 
+ * @returns {Promise<Object[]>}
+ */
+export const getVenueSports = async (venueId) => {
+    const sql = `
+        SELECT s.sport_id, s.name, s.description
+        FROM venue_sports vs
+        JOIN sports s ON vs.sport_id = s.sport_id
+        WHERE vs.venue_id = ?
+    `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows;
+};
+
+/**
  * Delete a venue by ID (including all dependencies)
  * 
  * @async
