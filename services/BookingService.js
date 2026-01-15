@@ -243,70 +243,22 @@ export const rescheduleBooking = async (bookingId, userId, newDate, newTime, hou
     const newEndStr = toMySQLDateTime(end);
 
     // Conflict Check
-    const hasConflict = await BookingRepository.hasBookingConflict(booking.venue_id, newStartStr, newEndStr);
-
-    // Note: hasBookingConflict counts *all* confirmed/pending bookings.
-    // It might count *this* booking itself as a conflict if we don't exclude it?
-    // The current query in Repository logic:
-    // SELECT COUNT(*) ... WHERE ... (booking_start < ? AND booking_end > ?) ...
-    // If we are *changing* the time, the *old* time slot is in the DB.
-    // If the *new* time slot overlaps with the *old* time slot of the *same* booking, is that a conflict?
-    // Yes, essentially. BUT we are updating this booking. 
-    // Wait, if it overlaps with *itself*, we should ignore *itself*.
-    // BookingRepository.hasBookingConflict DOES NOT exclude current bookingId.
-    // This is a potential bug if rescheduling to an overlapping time (e.g. shift by 1 hour).
-    // We should fix hasBookingConflict or create a variant that excludes a bookingId.
-    // For now, let's assume we can add an optional excludeBookingId param to Repo?
-    // Or we just check. If `hasConflict` returns true, we dig deeper?
-    // NO, let's modify `BookingRepository.js` logic for `hasBookingConflict` to accept `excludeBookingId`.
-
-    // I will assume I'll update Repo first or pass it. 
-    // To proceed without blocking, I'll rely on the standard check. If user moves to a completely different slot, it works.
-    // If they shift slightly (overlap old self), it fails. This is an edge case but acceptable for MVP?
-    // No, "I want to move it 1 hour later" is a common use case.
-    // I NEED to exclude `bookingId`.
-    // I'll update `BookingRepository.js` to accept `excludeBookingId`.
-
-    if (hasConflict) {
-        // We'll trust the repo check for now, but I really should exclude self.
-        // Let's see if I can do it in the next step.
-        // For now, let's use the repo as is.
-        // Wait, if I can't change repo signature easily without breaking others...
-        // `hasBookingConflict` is used in Controller too.
-        // I'll add `excludeBookingId` as optional param.
-    }
+    const availableCourtId = await findAvailableCourt(booking.venue_id, newStartStr, newEndStr, booking.sport_id, bookingId);
+    if (!availableCourtId) throw new Error("No courts available for this sport.");
 
     const conn = await BookingRepository.getPool().getConnection();
     try {
         await conn.beginTransaction();
+        const hasConflict = await BookingRepository.hasBookingConflict(booking.venue_id, newStartStr, newEndStr, availableCourtId, bookingId);
+        if (hasConflict) throw new Error("Slot taken during processing");
 
-        // We should ideally lock the row or re-check conflict inside transaction with "exclude self".
-        // Let's implement a specific query here if Repo update is too much context switch?
-        // No, using Repo is better.
-
-        // Let's blindly check conflict again but excluding self.
-        const [rows] = await conn.execute(
-            `SELECT COUNT(*) AS conflict_count
-             FROM bookings
-             WHERE venue_id = ?
-             AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
-             AND booking_id != ? 
-             AND (
-               (booking_start < ? AND booking_end > ?) OR
-               (booking_start >= ? AND booking_start < ?) OR
-               (booking_end > ? AND booking_end <= ?)
-             )`,
-            [booking.venue_id, bookingId, newEndStr, newStartStr, newStartStr, newEndStr, newStartStr, newEndStr]
-        );
-
-        if (rows[0].conflict_count > 0) {
-            throw new Error("Time slot unavailable");
-        }
-
-        await BookingRepository.updateBookingDates(conn, bookingId, newStartStr, newEndStr);
+        await BookingRepository.updateBookingDetails(conn, bookingId, {
+            courtId: availableCourtId,
+            bookingStart: newStartStr,
+            bookingEnd: newEndStr
+        });
         await conn.commit();
-
-        return { success: true, message: "Booking rescheduled successfully" };
+        return { success: true, message: "Booking rescheduled successfully", newCourtId: availableCourtId };
 
     } catch (err) {
         await conn.rollback();
@@ -388,9 +340,10 @@ export const getAvailableTimeSlots = async (venueId, date, hours, sportId) => {
  * @param {string} startStr (MySQL DateTime)
  * @param {string} endStr (MySQL DateTime)
  * @param {number} sportId 
+ * @param {number} excludeBookingId (Optional)
  * @returns {Promise<number|null>} Court ID or null if none available
  */
-export const findAvailableCourt = async (venueId, startStr, endStr, sportId) => {
+export const findAvailableCourt = async (venueId, startStr, endStr, sportId, excludeBookingId = null) => {
     const courts = await CourtRepository.getCourtsByVenueAndSport(venueId, sportId);
     if (courts.length === 0) return null;
 
@@ -402,6 +355,7 @@ export const findAvailableCourt = async (venueId, startStr, endStr, sportId) => 
     for (const court of courts) {
         const courtConflicts = allSlots.filter(s =>
             (s.court_id === court.court_id || s.court_id === null) &&
+            (s.booking_id !== excludeBookingId) &&
             (start < new Date(s.booking_end) && end > new Date(s.booking_start))
         );
 

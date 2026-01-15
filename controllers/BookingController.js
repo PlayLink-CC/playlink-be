@@ -93,7 +93,7 @@ export const createCheckoutSession = async (req, res) => {
           await conn.beginTransaction();
 
           // Double check conflict
-          const conflictNow = await BookingRepository.hasBookingConflict(venueId, bookingStart, bookingEnd);
+          const conflictNow = await BookingRepository.hasBookingConflict(venueId, bookingStart, bookingEnd, availableCourtId);
           if (conflictNow) throw new Error("Slot taken during processing");
 
           // Deduct Points

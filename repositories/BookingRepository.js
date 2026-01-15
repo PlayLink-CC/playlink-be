@@ -261,9 +261,13 @@ export const getBookingWithVenue = async (conn, bookingId) => {
       b.guest_email,
       v.name AS venue_name,
       v.address,
-      v.city
+      v.city,
+      s.name AS sport_name,
+      c.name AS court_name
      FROM bookings b
      JOIN venues v ON b.venue_id = v.venue_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      WHERE b.booking_id = ?`,
     [bookingId]
   );
@@ -310,19 +314,10 @@ export const updateBookingCancellation = async (conn, bookingId, cancellationTim
   );
 };
 
-/**
- * Update booking dates (Reschedule)
- * 
- * @async
- * @param {Object} conn
- * @param {number} bookingId
- * @param {string} start
- * @param {string} end
- */
-export const updateBookingDates = async (conn, bookingId, start, end) => {
+export const updateBookingDetails = async (conn, bookingId, { courtId, bookingStart, bookingEnd }) => {
   await conn.execute(
-    "UPDATE bookings SET booking_start = ?, booking_end = ? WHERE booking_id = ?",
-    [start, end, bookingId]
+    "UPDATE bookings SET court_id = ?, booking_start = ?, booking_end = ? WHERE booking_id = ?",
+    [courtId, bookingStart, bookingEnd, bookingId]
   );
 };
 
@@ -366,10 +361,14 @@ export const getUserBookings = async (userId) => {
        cp.hours_before_start,
        bp.share_amount,
        bp.payment_status,
-       bp.is_initiator
+       bp.is_initiator,
+       s.name AS sport_name,
+       c.name AS court_name
      FROM booking_participants bp
      JOIN bookings b ON b.booking_id = bp.booking_id
      JOIN venues   v ON v.venue_id  = b.venue_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      LEFT JOIN cancellation_policies cp ON COALESCE(b.cancellation_policy_id, v.cancellation_policy_id) = cp.policy_id
      WHERE bp.user_id = ?
      ORDER BY b.booking_start DESC`,
@@ -407,7 +406,7 @@ export const getPricingRules = async (venueId) => {
  * @returns {Promise<boolean>} True if there's a conflict, false otherwise
  * @throws {Error} Database query error
  */
-export const hasBookingConflict = async (venueId, startDateTime, endDateTime, courtId = null) => {
+export const hasBookingConflict = async (venueId, startDateTime, endDateTime, courtId = null, excludeBookingId = null) => {
   let query = `SELECT COUNT(*) AS conflict_count
      FROM bookings
      WHERE venue_id = ?
@@ -417,6 +416,11 @@ export const hasBookingConflict = async (venueId, startDateTime, endDateTime, co
   if (courtId) {
     query += ` AND (court_id = ? OR court_id IS NULL)`;
     params.push(courtId);
+  }
+
+  if (excludeBookingId) {
+    query += ` AND booking_id != ?`;
+    params.push(excludeBookingId);
   }
 
   query += ` AND (
