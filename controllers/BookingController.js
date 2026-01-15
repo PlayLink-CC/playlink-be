@@ -315,7 +315,7 @@ export const handleCheckoutSuccess = async (req, res) => {
 
       // Conflict Check
       const hasConflict = await BookingRepository.hasBookingConflict(
-        venue_id, booking_start, booking_end
+        venue_id, booking_start, booking_end, court_id
       );
 
       if (hasConflict) {
