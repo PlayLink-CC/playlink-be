@@ -71,17 +71,12 @@ export const findAllVenues = async () => {
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
         v.description
     FROM venues v
-    LEFT JOIN venue_sports vs 
-        ON vs.venue_id = v.venue_id
-    LEFT JOIN sports s 
-        ON s.sport_id = vs.sport_id
-    LEFT JOIN venue_images vi 
-        ON vi.venue_id = v.venue_id
-       AND vi.is_primary = 1
-    LEFT JOIN venue_amenities va 
-        ON va.venue_id = v.venue_id
-    LEFT JOIN amenities a 
-        ON a.amenity_id = va.amenity_id
+    LEFT JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
+    LEFT JOIN court_sports cs ON cs.court_id = c.court_id
+    LEFT JOIN sports s ON s.sport_id = cs.sport_id
+    LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
     GROUP BY 
         v.venue_id,
         v.name,
@@ -141,10 +136,12 @@ export const findMostBookedVenuesThisWeek = async () => {
         ON va.venue_id = v.venue_id
     LEFT JOIN amenities a 
         ON a.amenity_id = va.amenity_id
-    LEFT JOIN venue_sports vs 
-        ON vs.venue_id = v.venue_id
+    LEFT JOIN courts c
+        ON c.venue_id = v.venue_id AND c.is_active = 1
+    LEFT JOIN court_sports cs
+        ON cs.court_id = c.court_id
     LEFT JOIN sports s 
-        ON s.sport_id = vs.sport_id
+        ON s.sport_id = cs.sport_id
     WHERE v.is_active = 1
     GROUP BY 
         v.venue_id,
@@ -197,17 +194,12 @@ export const findVenuesBySearch = async (searchText) => {
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
         v.description
     FROM venues v
-    LEFT JOIN venue_sports vs 
-        ON vs.venue_id = v.venue_id
-    LEFT JOIN sports s 
-        ON s.sport_id = vs.sport_id
-    LEFT JOIN venue_images vi 
-        ON vi.venue_id = v.venue_id
-       AND vi.is_primary = 1
-    LEFT JOIN venue_amenities va 
-        ON va.venue_id = v.venue_id
-    LEFT JOIN amenities a 
-        ON a.amenity_id = va.amenity_id
+    LEFT JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
+    LEFT JOIN court_sports cs ON cs.court_id = c.court_id
+    LEFT JOIN sports s ON s.sport_id = cs.sport_id
+    LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
+    LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
+    LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
     WHERE v.name LIKE ? 
        OR v.address LIKE ? 
        OR v.city LIKE ? 
@@ -290,13 +282,32 @@ export const createVenue = async (venueData) => {
         );
         const venueId = result.insertId;
 
-        // 2. Insert Sports
+        // 2. Insert Sports and Create Dedicated Courts
         if (sportIds && sportIds.length > 0) {
+            // Keep venue_sports for backward compatibility
             const sportValues = sportIds.map((id) => [venueId, id]);
             await conn.query(
                 `INSERT INTO venue_sports (venue_id, sport_id) VALUES ?`,
                 [sportValues]
             );
+
+            // Create a dedicated court for each sport
+            // We fetch sport names to name the courts nicely
+            const [sports] = await conn.query("SELECT sport_id, name FROM sports WHERE sport_id IN (?)", [sportIds]);
+
+            for (const s of sports) {
+                const [courtResult] = await conn.execute(
+                    "INSERT INTO courts (venue_id, name, is_active) VALUES (?, ?, ?)",
+                    [venueId, `${s.name} Court`, 1]
+                );
+                const courtId = courtResult.insertId;
+
+                // Link this specific court ONLY to its sport
+                await conn.execute(
+                    "INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)",
+                    [courtId, s.sport_id]
+                );
+            }
         }
 
         // 3. Insert Amenities
@@ -530,10 +541,12 @@ export const findVenueById = async (venueId) => {
         COALESCE(AVG(r.rating), 0) AS avg_rating,
         COUNT(DISTINCT r.review_id) AS review_count
     FROM venues v
-    LEFT JOIN venue_sports vs 
-        ON vs.venue_id = v.venue_id
+    LEFT JOIN courts c
+        ON c.venue_id = v.venue_id AND c.is_active = 1
+    LEFT JOIN court_sports cs
+        ON cs.court_id = c.court_id
     LEFT JOIN sports s 
-        ON s.sport_id = vs.sport_id
+        ON s.sport_id = cs.sport_id
     LEFT JOIN venue_images vi 
         ON vi.venue_id = v.venue_id
         AND vi.is_primary = 1
@@ -576,6 +589,22 @@ export const findVenueById = async (venueId) => {
  * @returns {Promise<boolean>} True if deleted
  */
 /**
+ * Get sports supported by a venue
+ * @param {number} venueId 
+ * @returns {Promise<Object[]>}
+ */
+export const getVenueSports = async (venueId) => {
+    const sql = `
+        SELECT s.sport_id, s.name, s.description
+        FROM venue_sports vs
+        JOIN sports s ON vs.sport_id = s.sport_id
+        WHERE vs.venue_id = ?
+    `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows;
+};
+
+/**
  * Delete a venue by ID (including all dependencies)
  * 
  * @async
@@ -593,6 +622,7 @@ export const deleteVenue = async (venueId) => {
         await conn.execute("DELETE FROM venue_sports WHERE venue_id = ?", [venueId]);
         await conn.execute("DELETE FROM venue_amenities WHERE venue_id = ?", [venueId]);
         await conn.execute("DELETE FROM reviews WHERE venue_id = ?", [venueId]);
+        await conn.execute("DELETE FROM courts WHERE venue_id = ?", [venueId]);
 
         // Note: Bookings are deleted by BookingService/Repository before calling this, 
         // but we can ensure safety here too if we want, but circular dependency might be an issue if we import BookingRepo.

@@ -12,6 +12,7 @@ import * as WalletRepository from "../repositories/WalletRepository.js";
 import * as SplitPaymentService from "../services/SplitPaymentService.js";
 import * as BookingService from "../services/BookingService.js";
 import { calculateDynamicPrice } from "../services/VenueService.js";
+import * as CourtRepository from "../repositories/CourtRepository.js";
 
 /**
  * POST /api/bookings/checkout-session
@@ -22,7 +23,7 @@ export const createCheckoutSession = async (req, res) => {
   const userId = req.user.id; // from auth middleware
   const userEmail = req.user.email;
 
-  const { venueId, date, time, hours, invites: rawInvites = [], useWallet = false } = req.body;
+  const { venueId, date, time, hours, sportId, invites: rawInvites = [], useWallet = false } = req.body;
   const invites = rawInvites.filter(email => email !== userEmail);
 
   if (!venueId || !date || !time || !hours) {
@@ -56,16 +57,17 @@ export const createCheckoutSession = async (req, res) => {
     const bookingStart = toMySQLDateTime(start);
     const bookingEnd = toMySQLDateTime(end);
 
-    // 2.5) Check for conflicts
-    const hasConflict = await BookingRepository.hasBookingConflict(
+    // 2.5) Check for conflicts (and find an available court)
+    const availableCourtId = await BookingService.findAvailableCourt(
       venueId,
       bookingStart,
-      bookingEnd
+      bookingEnd,
+      sportId
     );
 
-    if (hasConflict) {
+    if (!availableCourtId) {
       return res.status(409).json({
-        message: "This time slot is already booked. Please select a different time.",
+        message: "This time slot is no longer available for the selected sport. Please select a different time or sport.",
         conflictDetected: true,
       });
     }
@@ -91,7 +93,7 @@ export const createCheckoutSession = async (req, res) => {
           await conn.beginTransaction();
 
           // Double check conflict
-          const conflictNow = await BookingRepository.hasBookingConflict(venueId, bookingStart, bookingEnd);
+          const conflictNow = await BookingRepository.hasBookingConflict(venueId, bookingStart, bookingEnd, availableCourtId);
           if (conflictNow) throw new Error("Slot taken during processing");
 
           // Deduct Points
@@ -107,6 +109,8 @@ export const createCheckoutSession = async (req, res) => {
           // Create Booking
           const bookingId = await BookingRepository.createBooking(conn, {
             venueId,
+            courtId: availableCourtId,
+            sportId: sportId,
             userId,
             bookingStart,
             bookingEnd,
@@ -217,7 +221,9 @@ export const createCheckoutSession = async (req, res) => {
         points_to_deduct: String(pointsToDeduct),
         points_used: String(pointsToDeduct),
         paid_amount: String(amountToCharge),
-        owner_id: String(venue.owner_id) // Add owner_id for crediting
+        owner_id: String(venue.owner_id),
+        sport_id: String(sportId),
+        court_id: String(availableCourtId)
       },
       success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
@@ -260,7 +266,7 @@ export const handleCheckoutSuccess = async (req, res) => {
       total_amount, cancellation_policy_id, custom_cancellation_policy,
       custom_refund_percentage, custom_hours_before_start,
       invites, share_amount, points_to_deduct,
-      type, booking_id, owner_id // extract owner_id
+      type, booking_id, owner_id, sport_id, court_id // added sport_id and court_id
     } = session.metadata;
 
     console.log(`[CheckoutSuccess] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}, Type: ${type}`);
@@ -309,7 +315,7 @@ export const handleCheckoutSuccess = async (req, res) => {
 
       // Conflict Check
       const hasConflict = await BookingRepository.hasBookingConflict(
-        venue_id, booking_start, booking_end
+        venue_id, booking_start, booking_end, court_id
       );
 
       if (hasConflict) {
@@ -324,8 +330,10 @@ export const handleCheckoutSuccess = async (req, res) => {
 
       // Create Booking
       const bookingId = await BookingRepository.createBooking(conn, {
-        venueId: venue_id,
-        userId: user_id,
+        venueId: Number(venue_id),
+        courtId: Number(court_id),
+        sportId: Number(sport_id),
+        userId: Number(user_id),
         bookingStart: booking_start,
         bookingEnd: booking_end,
         totalAmount: Number(total_amount),
@@ -535,14 +543,25 @@ export const paySplitShare = async (req, res) => {
 
 export const getBookedSlots = async (req, res) => {
   const { venueId } = req.params;
-  const { date } = req.query;
+  const { date, sportId } = req.query;
 
   if (!venueId || !date) {
     return res.status(400).json({ message: "Missing venueId or date parameter" });
   }
 
   try {
-    const slots = await BookingRepository.getBookedSlotsForDate(venueId, date);
+    let slots = await BookingRepository.getBookedSlotsForDate(venueId, date);
+
+    // If sportId provided, only return slots that block this sport
+    if (sportId) {
+      const targetSportId = Number(sportId);
+      const courts = await CourtRepository.getCourtsByVenueAndSport(venueId, targetSportId);
+      const courtIds = courts.map(c => Number(c.court_id));
+
+      // A slot blocks the sport if it's venue-wide (null) OR on one of the sport's courts
+      slots = slots.filter(s => s.court_id === null || courtIds.includes(Number(s.court_id)));
+    }
+
     return res.json({ slots });
   } catch (err) {
     console.error("Error fetching booked slots:", err);
@@ -638,57 +657,15 @@ export const calculatePrice = async (req, res) => {
  */
 export const getAvailableTimeSlots = async (req, res) => {
   const { venueId } = req.params;
-  const { date, hours } = req.query;
+  const { date, hours, sportId } = req.query;
 
-  if (!venueId || !date || !hours) {
-    return res.status(400).json({ message: "Missing required parameters" });
+  if (!venueId || !date || !hours || !sportId) {
+    return res.status(400).json({ message: "Missing required parameters (venueId, date, hours, sportId)" });
   }
 
   try {
-    const duration = Number(hours);
-    const slots = await BookingRepository.getBookedSlotsForDate(venueId, date);
-
-    // Define operating hours (7 AM to 10 PM)
-    // In a real app, this should come from Venue settings
-    const openTime = 7 * 60; // 7:00 AM
-    const closeTime = 22 * 60; // 10:00 PM
-
-    const availableSlots = [];
-    const step = 60; // 1 hour intervals for cleaner UI, or 30 mins
-
-    // Generate all possible start times
-    for (let time = openTime; time <= closeTime - (duration * 60); time += step) {
-      const h = Math.floor(time / 60);
-      const m = time % 60;
-      const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-
-      const startDateTime = new Date(`${date}T${timeStr}:00`);
-      const endDateTime = new Date(startDateTime.getTime() + duration * 60 * 60 * 1000);
-
-      // Check conflict
-      let conflict = false;
-      for (const slot of slots) {
-        const slotStart = new Date(slot.booking_start);
-        const slotEnd = new Date(slot.booking_end);
-
-        // Check overlap
-        if (startDateTime < slotEnd && endDateTime > slotStart) {
-          conflict = true;
-          break;
-        }
-      }
-
-      // Check current time if date is today
-      const now = new Date();
-      if (startDateTime <= now) {
-        conflict = true;
-      }
-
-      availableSlots.push({ time: timeStr, available: !conflict });
-    }
-
+    const availableSlots = await BookingService.getAvailableTimeSlots(venueId, date, hours, Number(sportId));
     return res.json({ slots: availableSlots });
-
   } catch (err) {
     console.error("Error fetching available slots:", err);
     return res.status(500).json({ message: "Server error" });
@@ -720,7 +697,7 @@ export const getVenueCalendarBookings = async (req, res) => {
 
 export const createWalkInBooking = async (req, res) => {
   const { venueId } = req.params;
-  const { date, time, hours, notes, type, customerName, customerEmail } = req.body; // type: 'WALK_IN' or 'BLOCK'
+  const { date, time, hours, notes, type, customerName, customerEmail, sportId } = req.body; // type: 'WALK_IN' or 'BLOCK'
   const userId = req.user.id;
 
   if (!venueId || !date || !time || !hours) {
@@ -733,7 +710,15 @@ export const createWalkInBooking = async (req, res) => {
     const startStr = toMySQLDateTime(start);
     const endStr = toMySQLDateTime(end);
 
-    const hasConflict = await BookingRepository.hasBookingConflict(venueId, startStr, endStr);
+    // Find a court if sportId is provided, otherwise it's a legacy venue-wide block
+    const availableCourtId = sportId ? await BookingService.findAvailableCourt(venueId, startStr, endStr, sportId) : null;
+
+    if (sportId && !availableCourtId) {
+      return res.status(409).json({ message: "No courts available for this sport at the selected time" });
+    }
+
+    // Double check conflict on specific court (or venue-wide)
+    const hasConflict = await BookingRepository.hasBookingConflict(venueId, startStr, endStr, availableCourtId);
     if (hasConflict) {
       return res.status(409).json({ message: "Slot already booked" });
     }
@@ -741,26 +726,22 @@ export const createWalkInBooking = async (req, res) => {
     let bookingId;
 
     if (type === 'WALK_IN') {
-      // Create a confirmed booking for Walk-in (essentially a manual admin booking)
-      // We need connection for transaction if we want to add participants etc, but usually walk-in is simple.
-      // However, BookingRepository.createBooking expects a connection object.
       const pool = BookingRepository.getPool();
       const conn = await pool.getConnection();
 
       try {
         await conn.beginTransaction();
 
-        // Fetch venue minimal info for defaults if needed (policy id)
         const venue = await BookingRepository.getVenueById(venueId);
 
         bookingId = await BookingRepository.createBooking(conn, {
           venueId,
-          userId, // Owner created it
+          userId,
+          courtId: availableCourtId,
+          sportId: sportId || null,
           bookingStart: startStr,
           bookingEnd: endStr,
-          totalAmount: 0, // Walk-in usually handles payment externally or we can calculate.
-          // For now, let's say 0 or we could calc price if needed. 
-          // Let's assume 0 for internal tracking unless specified.
+          totalAmount: 0,
           cancellationPolicyId: venue?.cancellation_policy_id || 1,
           pointsUsed: 0,
           paidAmount: 0,
@@ -796,7 +777,7 @@ export const createWalkInBooking = async (req, res) => {
 
     } else {
       // Default to BLOCK
-      bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr);
+      bookingId = await BookingRepository.createBlock(venueId, userId, startStr, endStr, availableCourtId, sportId);
     }
 
     return res.json({ success: true, bookingId, message: type === 'WALK_IN' ? "Walk-in booking created" : "Slot blocked successfully" });

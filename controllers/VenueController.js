@@ -33,6 +33,7 @@ import {
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
+import * as CourtRepository from "../repositories/CourtRepository.js";
 import { toMySQLDateTime, createISTDate } from "../utils/dateUtil.js";
 
 /**
@@ -257,7 +258,7 @@ export const update = async (req, res) => {
  */
 export const blockSlot = async (req, res) => {
   const { id } = req.params;
-  const { date, startTime, endTime, reason, recurrence } = req.body;
+  const { date, startTime, endTime, reason, recurrence, sportId } = req.body;
 
   if (!date || !startTime || !endTime) {
     return res.status(400).json({ message: "Missing blocking details" });
@@ -272,7 +273,7 @@ export const blockSlot = async (req, res) => {
     }
 
     // Delegate to Service
-    const result = await blockVenueSlot(id, req.user.id, date, startTime, endTime, reason, recurrence);
+    const result = await blockVenueSlot(id, req.user.id, date, startTime, endTime, reason, recurrence, sportId);
 
     if (recurrence && recurrence.type === 'recurring') {
       res.status(201).json({
@@ -314,7 +315,8 @@ export const fetchVenueById = async (req, res) => {
   const { id } = req.params;
   try {
     const venue = await getVenueById(id);
-    res.json(venue);
+    const sports = await CourtRepository.getSportsByVenue(id);
+    res.json({ ...venue, sports });
   } catch (err) {
     console.error("Error fetching venue by ID:", err);
     if (err.message === "Venue not found") {
@@ -452,6 +454,17 @@ export const deleteReply = async (req, res) => {
     res.json({ message: "Reply deleted successfully" });
   } catch (err) {
     console.error("Error deleting reply:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const fetchVenueSports = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const sports = await VenueRepository.getVenueSports(id);
+    res.json(sports);
+  } catch (err) {
+    console.error("Error fetching venue sports:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

@@ -61,6 +61,8 @@ export const getVenueById = async (venueId) => {
 export const createBooking = async (conn, {
   venueId,
   userId,
+  courtId = null,
+  sportId = null,
   bookingStart,
   bookingEnd,
   totalAmount,
@@ -75,9 +77,9 @@ export const createBooking = async (conn, {
 }) => {
   const [result] = await conn.execute(
     `INSERT INTO bookings
-     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount, guest_name, guest_email)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0, guestName, guestEmail]
+     (venue_id, court_id, sport_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount, guest_name, guest_email)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [venueId, courtId, sportId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0, guestName, guestEmail]
   );
 
   return result.insertId;
@@ -259,9 +261,13 @@ export const getBookingWithVenue = async (conn, bookingId) => {
       b.guest_email,
       v.name AS venue_name,
       v.address,
-      v.city
+      v.city,
+      s.name AS sport_name,
+      c.name AS court_name
      FROM bookings b
      JOIN venues v ON b.venue_id = v.venue_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      WHERE b.booking_id = ?`,
     [bookingId]
   );
@@ -308,19 +314,10 @@ export const updateBookingCancellation = async (conn, bookingId, cancellationTim
   );
 };
 
-/**
- * Update booking dates (Reschedule)
- * 
- * @async
- * @param {Object} conn
- * @param {number} bookingId
- * @param {string} start
- * @param {string} end
- */
-export const updateBookingDates = async (conn, bookingId, start, end) => {
+export const updateBookingDetails = async (conn, bookingId, { courtId, bookingStart, bookingEnd }) => {
   await conn.execute(
-    "UPDATE bookings SET booking_start = ?, booking_end = ? WHERE booking_id = ?",
-    [start, end, bookingId]
+    "UPDATE bookings SET court_id = ?, booking_start = ?, booking_end = ? WHERE booking_id = ?",
+    [courtId, bookingStart, bookingEnd, bookingId]
   );
 };
 
@@ -364,10 +361,14 @@ export const getUserBookings = async (userId) => {
        cp.hours_before_start,
        bp.share_amount,
        bp.payment_status,
-       bp.is_initiator
+       bp.is_initiator,
+       s.name AS sport_name,
+       c.name AS court_name
      FROM booking_participants bp
      JOIN bookings b ON b.booking_id = bp.booking_id
      JOIN venues   v ON v.venue_id  = b.venue_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      LEFT JOIN cancellation_policies cp ON COALESCE(b.cancellation_policy_id, v.cancellation_policy_id) = cp.policy_id
      WHERE bp.user_id = ?
      ORDER BY b.booking_start DESC`,
@@ -377,12 +378,12 @@ export const getUserBookings = async (userId) => {
   return rows;
 };
 
-export const createBlock = async (venueId, userId, startTime, endTime) => {
+export const createBlock = async (venueId, userId, startTime, endTime, courtId = null, sportId = null) => {
   const sql = `
-        INSERT INTO bookings (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
-        VALUES (?, ?, ?, ?, 0, 'BLOCKED', 1)
+        INSERT INTO bookings (venue_id, court_id, sport_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'BLOCKED', 1)
     `;
-  const [result] = await pool.execute(sql, [venueId, userId, startTime, endTime]);
+  const [result] = await pool.execute(sql, [venueId, courtId, sportId, userId, startTime, endTime]);
   return result.insertId;
 };
 
@@ -405,20 +406,31 @@ export const getPricingRules = async (venueId) => {
  * @returns {Promise<boolean>} True if there's a conflict, false otherwise
  * @throws {Error} Database query error
  */
-export const hasBookingConflict = async (venueId, startDateTime, endDateTime) => {
-  const [rows] = await pool.execute(
-    `SELECT COUNT(*) AS conflict_count
+export const hasBookingConflict = async (venueId, startDateTime, endDateTime, courtId = null, excludeBookingId = null) => {
+  let query = `SELECT COUNT(*) AS conflict_count
      FROM bookings
      WHERE venue_id = ?
-     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
-     AND (
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')`;
+  const params = [venueId];
+
+  if (courtId) {
+    query += ` AND (court_id = ? OR court_id IS NULL)`;
+    params.push(courtId);
+  }
+
+  if (excludeBookingId) {
+    query += ` AND booking_id != ?`;
+    params.push(excludeBookingId);
+  }
+
+  query += ` AND (
        (booking_start < ? AND booking_end > ?) OR
        (booking_start >= ? AND booking_start < ?) OR
        (booking_end > ? AND booking_end <= ?)
-     )`,
-    [venueId, endDateTime, startDateTime, startDateTime, endDateTime, startDateTime, endDateTime]
-  );
+     )`;
+  params.push(endDateTime, startDateTime, startDateTime, endDateTime, startDateTime, endDateTime);
 
+  const [rows] = await pool.execute(query, params);
   return rows[0].conflict_count > 0;
 };
 
@@ -437,17 +449,22 @@ export const hasBookingConflict = async (venueId, startDateTime, endDateTime) =>
  * @returns {string} slots[].status - Booking status
  * @throws {Error} Database query error
  */
-export const getBookedSlotsForDate = async (venueId, date) => {
-  const [rows] = await pool.execute(
-    `SELECT booking_start, booking_end, status
+export const getBookedSlotsForDate = async (venueId, date, courtId = null) => {
+  let query = `SELECT booking_start, booking_end, status, court_id
      FROM bookings
      WHERE venue_id = ?
      AND DATE(booking_start) = ?
-     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
-     ORDER BY booking_start ASC`,
-    [venueId, date]
-  );
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')`;
+  const params = [venueId, date];
 
+  if (courtId) {
+    query += ` AND court_id = ?`;
+    params.push(courtId);
+  }
+
+  query += ` ORDER BY booking_start ASC`;
+
+  const [rows] = await pool.execute(query, params);
   return rows;
 };
 
@@ -494,10 +511,14 @@ export const getOwnerBookings = async (ownerId) => {
        b.created_at,
        v.name AS venue_name,
        u.full_name AS customer_name,
-       u.email AS customer_email
+       u.email AS customer_email,
+       s.name AS sport_name,
+       c.name AS court_name
      FROM bookings b
      JOIN venues v ON b.venue_id = v.venue_id
      LEFT JOIN users u ON b.created_by = u.user_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      WHERE v.owner_id = ?
      ORDER BY b.booking_start DESC`,
     [ownerId]
@@ -700,10 +721,13 @@ export const deleteVenueBookings = async (venueId) => {
 export const getBookingsForRange = async (venueId, startDate, endDate) => {
   const [rows] = await pool.execute(
     `SELECT b.booking_id, b.booking_start, b.booking_end, b.status, b.created_by, b.total_amount, b.paid_amount,
-            b.guest_name, b.guest_email,
-            u.full_name AS customer_name, u.email AS customer_email
+            b.guest_name, b.guest_email, b.sport_id, b.court_id,
+            u.full_name AS customer_name, u.email AS customer_email,
+            s.name AS sport_name, c.name AS court_name
      FROM bookings b
      LEFT JOIN users u ON b.created_by = u.user_id
+     LEFT JOIN sports s ON b.sport_id = s.sport_id
+     LEFT JOIN courts c ON b.court_id = c.court_id
      WHERE b.venue_id = ?
      AND b.status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
      AND (
