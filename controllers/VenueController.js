@@ -33,6 +33,7 @@ import {
 } from "../services/VenueService.js";
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
+import * as CourtRepository from "../repositories/CourtRepository.js";
 import { toMySQLDateTime, createISTDate } from "../utils/dateUtil.js";
 
 /**
@@ -314,7 +315,8 @@ export const fetchVenueById = async (req, res) => {
   const { id } = req.params;
   try {
     const venue = await getVenueById(id);
-    res.json(venue);
+    const sports = await CourtRepository.getSportsByVenue(id);
+    res.json({ ...venue, sports });
   } catch (err) {
     console.error("Error fetching venue by ID:", err);
     if (err.message === "Venue not found") {

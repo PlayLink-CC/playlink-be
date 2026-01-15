@@ -61,6 +61,8 @@ export const getVenueById = async (venueId) => {
 export const createBooking = async (conn, {
   venueId,
   userId,
+  courtId = null,
+  sportId = null,
   bookingStart,
   bookingEnd,
   totalAmount,
@@ -75,9 +77,9 @@ export const createBooking = async (conn, {
 }) => {
   const [result] = await conn.execute(
     `INSERT INTO bookings
-     (venue_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount, guest_name, guest_email)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [venueId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0, guestName, guestEmail]
+     (venue_id, court_id, sport_id, created_by, booking_start, booking_end, total_amount, status, cancellation_policy_id, custom_cancellation_policy, custom_refund_percentage, custom_hours_before_start, points_used, paid_amount, guest_name, guest_email)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [venueId, courtId, sportId, userId, bookingStart, bookingEnd, totalAmount, cancellationPolicyId, customCancellationPolicy || null, customRefundPercentage || null, customHoursBeforeStart || null, pointsUsed || 0, paidAmount || 0, guestName, guestEmail]
   );
 
   return result.insertId;
@@ -405,20 +407,26 @@ export const getPricingRules = async (venueId) => {
  * @returns {Promise<boolean>} True if there's a conflict, false otherwise
  * @throws {Error} Database query error
  */
-export const hasBookingConflict = async (venueId, startDateTime, endDateTime) => {
-  const [rows] = await pool.execute(
-    `SELECT COUNT(*) AS conflict_count
+export const hasBookingConflict = async (venueId, startDateTime, endDateTime, courtId = null) => {
+  let query = `SELECT COUNT(*) AS conflict_count
      FROM bookings
      WHERE venue_id = ?
-     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
-     AND (
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')`;
+  const params = [venueId];
+
+  if (courtId) {
+    query += ` AND (court_id = ? OR court_id IS NULL)`;
+    params.push(courtId);
+  }
+
+  query += ` AND (
        (booking_start < ? AND booking_end > ?) OR
        (booking_start >= ? AND booking_start < ?) OR
        (booking_end > ? AND booking_end <= ?)
-     )`,
-    [venueId, endDateTime, startDateTime, startDateTime, endDateTime, startDateTime, endDateTime]
-  );
+     )`;
+  params.push(endDateTime, startDateTime, startDateTime, endDateTime, startDateTime, endDateTime);
 
+  const [rows] = await pool.execute(query, params);
   return rows[0].conflict_count > 0;
 };
 
@@ -437,17 +445,22 @@ export const hasBookingConflict = async (venueId, startDateTime, endDateTime) =>
  * @returns {string} slots[].status - Booking status
  * @throws {Error} Database query error
  */
-export const getBookedSlotsForDate = async (venueId, date) => {
-  const [rows] = await pool.execute(
-    `SELECT booking_start, booking_end, status
+export const getBookedSlotsForDate = async (venueId, date, courtId = null) => {
+  let query = `SELECT booking_start, booking_end, status, court_id
      FROM bookings
      WHERE venue_id = ?
      AND DATE(booking_start) = ?
-     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')
-     ORDER BY booking_start ASC`,
-    [venueId, date]
-  );
+     AND status IN ('CONFIRMED', 'PENDING', 'BLOCKED')`;
+  const params = [venueId, date];
 
+  if (courtId) {
+    query += ` AND court_id = ?`;
+    params.push(courtId);
+  }
+
+  query += ` ORDER BY booking_start ASC`;
+
+  const [rows] = await pool.execute(query, params);
   return rows;
 };
 

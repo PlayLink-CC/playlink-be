@@ -1,5 +1,6 @@
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as WalletRepository from "../repositories/WalletRepository.js";
+import * as CourtRepository from "../repositories/CourtRepository.js";
 import * as DateUtil from "../utils/dateUtil.js";
 import { toMySQLDateTime, createISTDate } from "../utils/dateUtil.js";
 
@@ -313,4 +314,101 @@ export const rescheduleBooking = async (bookingId, userId, newDate, newTime, hou
     } finally {
         conn.release();
     }
+};
+
+/**
+ * Get available time slots for a venue and sport, considering multiple courts.
+ * 
+ * @param {number} venueId 
+ * @param {string} date (YYYY-MM-DD)
+ * @param {number} hours 
+ * @param {number} sportId 
+ */
+export const getAvailableTimeSlots = async (venueId, date, hours, sportId) => {
+    const duration = Number(hours);
+
+    // 1. Get all courts supporting this sport at this venue
+    const courts = await CourtRepository.getCourtsByVenueAndSport(venueId, sportId);
+    if (courts.length === 0) {
+        return []; // No courts support this sport
+    }
+
+    // 2. Get ALL booked slots for these courts on this date
+    const allSlots = await BookingRepository.getBookedSlotsForDate(venueId, date);
+
+    // Define operating hours (7 AM to 10 PM)
+    const openTime = 7 * 60;
+    const closeTime = 22 * 60;
+    const step = 60; // 1 hour intervals
+
+    const availableSlots = [];
+    const now = new Date();
+
+    // 3. Generate all possible start times
+    for (let time = openTime; time <= closeTime - (duration * 60); time += step) {
+        const h = Math.floor(time / 60);
+        const m = time % 60;
+        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+        const startDateTime = new Date(`${date}T${timeStr}:00`);
+        const endDateTime = new Date(startDateTime.getTime() + duration * 60 * 60 * 1000);
+
+        if (startDateTime <= now) {
+            availableSlots.push({ time: timeStr, available: false });
+            continue;
+        }
+
+        // A slot is available if AT LEAST ONE court is free
+        let isAnyCourtFree = false;
+
+        for (const court of courts) {
+            // Check if THIS specific court is free
+            const courtConflicts = allSlots.filter(s =>
+                (s.court_id === court.court_id || s.court_id === null) &&
+                (startDateTime < new Date(s.booking_end) && endDateTime > new Date(s.booking_start))
+            );
+
+            if (courtConflicts.length === 0) {
+                isAnyCourtFree = true;
+                break;
+            }
+        }
+
+        availableSlots.push({ time: timeStr, available: isAnyCourtFree });
+    }
+
+    return availableSlots;
+};
+
+/**
+ * Find an available court for a specific time and sport.
+ * Useful for assigning a court during booking creation.
+ * 
+ * @param {number} venueId 
+ * @param {string} startStr (MySQL DateTime)
+ * @param {string} endStr (MySQL DateTime)
+ * @param {number} sportId 
+ * @returns {Promise<number|null>} Court ID or null if none available
+ */
+export const findAvailableCourt = async (venueId, startStr, endStr, sportId) => {
+    const courts = await CourtRepository.getCourtsByVenueAndSport(venueId, sportId);
+    if (courts.length === 0) return null;
+
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+
+    const allSlots = await BookingRepository.getBookedSlotsForDate(venueId, startStr.split(' ')[0]);
+
+    for (const court of courts) {
+        const courtConflicts = allSlots.filter(s =>
+            (s.court_id === court.court_id || s.court_id === null) &&
+            (start < new Date(s.booking_end) && end > new Date(s.booking_start))
+        );
+
+        if (courtConflicts.length === 0) {
+            return court.court_id;
+        }
+    }
+
+    return null;
 };
