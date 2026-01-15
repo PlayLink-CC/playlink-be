@@ -14,6 +14,7 @@
  */
 
 import * as userRepository from "../repositories/UserRepository.js";
+import * as NotificationRepository from "../repositories/NotificationRepository.js";
 import bcrypt from "bcryptjs";
 
 /**
@@ -142,6 +143,25 @@ export const registerUser = async ({
   } catch (err) {
     console.error("Error linking guest bookings during registration:", err);
     // Don't fail registration if linking fails, just log logic error
+  }
+
+  // Personalization for Venue Owners: Notify nearby owners if a new owner joins
+  if (accountType === "VENUE_OWNER" && city) {
+    try {
+      const nearbyOwners = await userRepository.findOwnersByCity(city, newUser.user_id);
+
+      const notificationPromises = nearbyOwners.map(owner =>
+        NotificationRepository.createNotification(
+          owner.user_id,
+          `A new sports venue owner has joined ${city}! Keep an eye on your local competition.`,
+          "NEW_COMPETITOR"
+        )
+      );
+
+      await Promise.all(notificationPromises);
+    } catch (err) {
+      console.error("Error sending competitor notifications:", err);
+    }
   }
 
   return {

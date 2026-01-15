@@ -147,3 +147,22 @@ export const findIdsByEmails = async (emails) => {
   const [rows] = await connectDB.execute(sql, emails);
   return rows;
 };
+
+/**
+ * Find all venue owners in a specific city
+ * 
+ * @param {string} city 
+ * @param {number} excludeUserId - Optionally exclude a user ID
+ */
+export const findOwnersByCity = async (city, excludeUserId = null) => {
+  let sql = `SELECT user_id FROM users WHERE city = ? AND account_type = 'VENUE_OWNER'`;
+  const params = [city];
+
+  if (excludeUserId) {
+    sql += ` AND user_id != ?`;
+    params.push(excludeUserId);
+  }
+
+  const [rows] = await connectDB.execute(sql, params);
+  return rows;
+};

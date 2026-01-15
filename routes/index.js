@@ -20,6 +20,7 @@ import analyticsRoutes from "./Analytics.js";
 
 import walletRoutes from "./Wallet.js";
 import policyRoutes from "./Policy.js";
+import notificationRoutes from "./Notification.js";
 
 const router = express.Router();
 
@@ -30,5 +31,6 @@ router.use("/bookings", bookingRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/wallet", walletRoutes);
 router.use("/policies", policyRoutes);
+router.use("/notifications", notificationRoutes);
 
 export default router;
