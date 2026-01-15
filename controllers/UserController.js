@@ -60,7 +60,7 @@ export const getAllUsers = async (req, res) => {
  */
 export const register = async (req, res) => {
   try {
-    const { fullName, email, password, phone, accountType } = req.body;
+    const { fullName, email, password, phone, city, accountType } = req.body;
 
     if (!fullName || !email || !password) {
       return res
@@ -95,6 +95,7 @@ export const register = async (req, res) => {
       email,
       plainPassword: password,
       phone,
+      city,
       accountType: finalAccountType,
     });
 

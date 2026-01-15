@@ -32,7 +32,7 @@ import connectDB from "../config/dbconnection.js";
  * @throws {Error} Database connection error
  */
 export const findAll = async () => {
-  const sql = `SELECT user_id, full_name, email, phone, account_type, created_at, updated_at FROM users`;
+  const sql = `SELECT user_id, full_name, email, phone, city, account_type, created_at, updated_at FROM users`;
   const [rows] = await connectDB.execute(sql);
   return rows;
 };
@@ -80,11 +80,12 @@ export const createUser = async ({
   email,
   passwordHash,
   phone,
+  city,
   accountType,
 }) => {
   const insertSql = `
-    INSERT INTO users (full_name, email, password_hash, phone, account_type)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO users (full_name, email, password_hash, phone, city, account_type)
+    VALUES (?, ?, ?, ?, ?, ?)
   `;
 
   const [result] = await connectDB.execute(insertSql, [
@@ -92,13 +93,14 @@ export const createUser = async ({
     email,
     passwordHash,
     phone ?? null,
+    city ?? null,
     accountType,
   ]);
 
   const newUserId = result.insertId;
 
   const selectSql = `
-    SELECT user_id, full_name, email, phone, account_type, created_at, updated_at
+    SELECT user_id, full_name, email, phone, city, account_type, created_at, updated_at
     FROM users
     WHERE user_id = ?
   `;

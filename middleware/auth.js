@@ -25,9 +25,24 @@ export const authenticate = (req, res, next) => {
     req.user = payload; // attach to request
     next();
   } catch (err) {
-    console.error(err);
     return res.status(403).json({ error: "Token is invalid or expired" });
   }
+};
+
+/**
+ * Optional authentication - attaches user to req if token exists
+ */
+export const optionalAuthenticate = (req, res, next) => {
+  const token = req.signedCookies.authToken;
+  if (token) {
+    try {
+      const payload = verifyToken(token);
+      req.user = payload;
+    } catch (err) {
+      // ignore invalid tokens for optional auth
+    }
+  }
+  next();
 };
 
 /**
