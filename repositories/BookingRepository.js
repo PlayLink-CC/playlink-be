@@ -85,42 +85,20 @@ export const createBooking = async (conn, {
   return result.insertId;
 };
 
-/**
- * Add a participant to a booking
- *
- * Adds a user as a booking participant with specified share amount.
- * Should be called within a transaction.
- *
- * @async
- * @param {Object} conn - Database connection with transaction support
- * @param {Object} data - Participant data
- * @param {number} data.bookingId - Booking ID
- * @param {number} data.userId - User ID
- * @param {number} data.shareAmount - Share amount in LKR
- * @param {number} [data.isInitiator=0] - Whether this is the booking initiator (1 or 0)
- * @returns {Promise<void>}
- * @throws {Error} Database query error
- */
 export const addBookingParticipant = async (conn, {
   bookingId,
   userId,
   shareAmount,
   isInitiator = 0,
+  paymentStatus = 'PENDING',
   guestEmail = null,
   inviteToken = null
 }) => {
-  // If no userId, it's a guest invite -> status PENDING? Or ACCEPTED?
-  // User didn't specify status logic changes, but logically a guest hasn't 'Accepted' yet until they register/click.
-  // But existing users are auto-ACCEPTED in current logic (line 110).
-  // I will keep behavior consistent or just default to ACCEPTED/PENDING based on user existence?
-  // Let's assume PENDING for guests makes sense, but the prompt didn't ask for status changes. 
-  // I will just insert the fields.
-
   await conn.execute(
     `INSERT INTO booking_participants
      (booking_id, user_id, share_amount, is_initiator, invite_status, payment_status, guest_email, invite_token)
-     VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
-    [bookingId, userId, shareAmount, isInitiator, 'ACCEPTED', guestEmail, inviteToken]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [bookingId, userId, shareAmount, isInitiator, 'ACCEPTED', paymentStatus, guestEmail, inviteToken]
   );
 };
 
@@ -344,7 +322,7 @@ export const updateBookingDetails = async (conn, bookingId, { courtId, bookingSt
  */
 export const getUserBookings = async (userId) => {
   const [rows] = await pool.execute(
-    `SELECT
+    `SELECT DISTINCT
        b.booking_id,
        b.booking_start,
        b.booking_end,

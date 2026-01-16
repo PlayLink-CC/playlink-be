@@ -14,87 +14,100 @@ import * as BookingService from "../services/BookingService.js";
 import { calculateDynamicPrice } from "../services/VenueService.js";
 import * as CourtRepository from "../repositories/CourtRepository.js";
 
+// Helper to group contiguous 1-hour slots
+const groupContiguousSlots = (slots) => {
+  if (!slots || !slots.length) return [];
+  // Ensure slots are unique and sorted
+  const uniqueSlots = [...new Set(slots)];
+  const sorted = uniqueSlots.sort();
+  const groups = [];
+  let currentGroup = [sorted[0]];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    const [prevH, prevM] = prev.split(':').map(Number);
+    const [currH, currM] = curr.split(':').map(Number);
+
+    if (currH * 60 + currM === prevH * 60 + prevM + 60) {
+      currentGroup.push(curr);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [curr];
+    }
+  }
+  groups.push(currentGroup);
+  return groups.map(group => ({
+    time: group[0],
+    hours: group.length
+  }));
+};
+
 /**
  * POST /api/bookings/checkout-session
  *
- * Body: { venueId, date: "YYYY-MM-DD", time: "HH:MM", hours, invites: ["email1", ...], useWallet: boolean }
+ * Body: { venueId, date: "YYYY-MM-DD", slots: ["HH:MM", ...], invites: ["email1", ...], useWallet: boolean }
  */
 export const createCheckoutSession = async (req, res) => {
-  const userId = req.user.id; // from auth middleware
+  const userId = req.user.id;
   const userEmail = req.user.email;
 
-  const { venueId, date, time, hours, sportId, invites: rawInvites = [], useWallet = false } = req.body;
+  const { venueId, date, slots, sportId, invites: rawInvites = [], useWallet = false } = req.body;
   const invites = rawInvites.filter(email => email !== userEmail);
 
-  if (!venueId || !date || !time || !hours) {
-    return res.status(400).json({ message: "Missing booking details" });
+  if (!venueId || !date || !slots || !slots.length) {
+    return res.status(400).json({ message: "Missing booking details (venue, date, or slots)" });
   }
 
   try {
-    // 0) Validate time format and constraints
-    const timeValidationError = getTimeValidationError(time, Number(hours));
-    if (timeValidationError) {
-      return res.status(400).json({
-        message: "Invalid booking time",
-        details: timeValidationError
-      });
-    }
-
-    // 1) Get venue price
     const venue = await BookingRepository.getVenueById(venueId);
-    if (!venue) {
-      return res.status(404).json({ message: "Venue not found" });
-    }
+    if (!venue) return res.status(404).json({ message: "Venue not found" });
 
-    // 2) Compute start/end times
-    const start = createISTDate(date, time);
-    const end = new Date(start.getTime() + Number(hours) * 60 * 60 * 1000);
-    const now = new Date();
-    if (start.getTime() <= now.getTime()) {
-      return res.status(400).json({ message: "Bookings must be in the future" });
-    }
+    const groups = groupContiguousSlots(slots);
+    const bookingDetails = [];
+    let totalAmount = 0;
 
-    const bookingStart = toMySQLDateTime(start);
-    const bookingEnd = toMySQLDateTime(end);
+    for (const group of groups) {
+      const { time, hours } = group;
 
-    // 2.5) Check for conflicts (and find an available court)
-    const availableCourtId = await BookingService.findAvailableCourt(
-      venueId,
-      bookingStart,
-      bookingEnd,
-      sportId
-    );
+      const timeError = getTimeValidationError(time, hours);
+      if (timeError) {
+        return res.status(400).json({ message: `Invalid time for slot ${time}: ${timeError}` });
+      }
 
-    if (!availableCourtId) {
-      return res.status(409).json({
-        message: "This time slot is no longer available for the selected sport. Please select a different time or sport.",
-        conflictDetected: true,
+      const start = createISTDate(date, time);
+      const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+      const startStr = toMySQLDateTime(start);
+      const endStr = toMySQLDateTime(end);
+
+      const availableCourtId = await BookingService.findAvailableCourt(venueId, startStr, endStr, sportId);
+      if (!availableCourtId) {
+        return res.status(409).json({ message: `Slot ${time} (${hours}h) is no longer available.` });
+      }
+
+      const amount = await calculateDynamicPrice(venue, date, time, hours);
+      totalAmount += amount;
+
+      bookingDetails.push({
+        time,
+        hours,
+        startStr,
+        endStr,
+        courtId: availableCourtId,
+        amount
       });
     }
 
-    // 3) Compute total amount with Dynamic Pricing
-    const totalAmount = await calculateDynamicPrice(venue, date, time, hours);
-    const participantCount = invites.length;
+    const shareAmount = SplitPaymentService.calculateShares(totalAmount, invites.length);
 
-    // Calculate share per person
-    const shareAmount = SplitPaymentService.calculateShares(totalAmount, participantCount);
-
-    // 4) Wallet Logic
-    let pointsToDeduct = 0;
-    let amountToCharge = totalAmount;
-
+    // Wallet Logic (Simplified for Multi-booking: only support full points payment if it covers ALL)
     if (useWallet) {
       const walletBalance = await WalletRepository.getWalletBalance(userId);
       if (walletBalance >= totalAmount) {
-        // FULL PAYMENT WITH POINTS
-        // Execute Immediate Booking
-        const conn = await BookingRepository.getPool().getConnection();
+        const pool = BookingRepository.getPool();
+        const conn = await pool.getConnection();
         try {
           await conn.beginTransaction();
-
-          // Double check conflict
-          const conflictNow = await BookingRepository.hasBookingConflict(venueId, bookingStart, bookingEnd, availableCourtId);
-          if (conflictNow) throw new Error("Slot taken during processing");
 
           // Deduct Points
           await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
@@ -102,128 +115,87 @@ export const createCheckoutSession = async (req, res) => {
             userId,
             amount: -totalAmount,
             type: "DEBIT",
-            description: `Booking payment (Points) for ${venue.name}`,
+            description: `Multi-slot Booking payment (Points) for ${venue.name}`,
             referenceType: "BOOKING_PAYMENT"
           });
 
-          // Create Booking
-          const bookingId = await BookingRepository.createBooking(conn, {
-            venueId,
-            courtId: availableCourtId,
-            sportId: sportId,
-            userId,
-            bookingStart,
-            bookingEnd,
-            totalAmount,
-            cancellationPolicyId: venue.cancellation_policy_id,
-            customCancellationPolicy: venue.custom_cancellation_policy,
-            customRefundPercentage: venue.custom_refund_percentage,
-            customHoursBeforeStart: venue.custom_hours_before_start,
-            pointsUsed: totalAmount, // Full points payment
-            paidAmount: 0 // No cash/card paid
-          });
+          const bookingIds = [];
+          for (const b of bookingDetails) {
+            const bookingId = await BookingRepository.createBooking(conn, {
+              venueId,
+              courtId: b.courtId,
+              sportId: sportId,
+              userId,
+              bookingStart: b.startStr,
+              bookingEnd: b.endStr,
+              totalAmount: b.amount,
+              cancellationPolicyId: venue.cancellation_policy_id,
+              customCancellationPolicy: venue.custom_cancellation_policy,
+              customRefundPercentage: venue.custom_refund_percentage,
+              customHoursBeforeStart: venue.custom_hours_before_start,
+              pointsUsed: b.amount,
+              paidAmount: 0
+            });
 
-          // Add Initiator (PAID)
-          await BookingRepository.addBookingParticipant(conn, {
-            bookingId,
-            userId,
-            shareAmount,
-            isInitiator: 1
-          });
-          // Update Payment Status for Initiator
-          await BookingRepository.updateParticipantsPaymentStatus(conn, bookingId, 'PAID');
-          // Note: updateParticipantsPaymentStatus sets ALL to STATUS. 
-          // BUT initiator should be PAID. If we have invitees, they are added later? 
-          // Wait, updateParticipantsPaymentStatus updates ALL. 
-          // We should be careful. 
+            await BookingRepository.addBookingParticipant(conn, {
+              bookingId, userId, shareAmount: b.amount / (invites.length + 1), isInitiator: 1, paymentStatus: 'PAID'
+            });
 
-          // Let's rely on SplitPaymentService to add invitees
-          // Pass 'conn' to avoid deadlock/timeout since we are inside a transaction
-          await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, shareAmount, conn);
+            await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, b.amount / (invites.length + 1), conn);
+            await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
 
-          // Mark Booking CONFIRMED
-          await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+            await BookingRepository.createPayment(conn, {
+              bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_MULTI_${Date.now()}`
+            });
 
-          // Create Payment Record (Points)
-          await BookingRepository.createPayment(conn, {
-            bookingId,
-            payerId: userId,
-            amount: totalAmount,
-            currency: "LKR", // Points
-            providerReference: `POINTS_${Date.now()}`
-          });
-          await BookingRepository.updatePaymentStatus(conn, `POINTS_${Date.now()}`, 'SUCCEEDED');
+            bookingIds.push(bookingId);
+          }
 
-          // CREDIT OWNER (Wallet Payment)
+          // Credit Owner
           if (venue.owner_id) {
             await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
             await WalletRepository.createTransaction(conn, {
-              userId: venue.owner_id,
-              amount: totalAmount,
-              type: 'CREDIT',
-              description: `Revenue from Booking #${bookingId}`,
-              referenceType: 'BOOKING_PAYMENT',
-              referenceId: bookingId
+              userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
+              description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
+              referenceType: 'BOOKING_PAYMENT'
             });
           }
 
-          // Fix provider ref logic
-          // Actually createPayment takes providerReference.
-
           await conn.commit();
-          return res.json({ success: true, bookingId, message: "Booking confirmed with Points!" });
-
+          return res.json({ success: true, message: "Bookings confirmed with Points!" });
         } catch (err) {
           await conn.rollback();
-          console.error("Points payment failed", err);
-          return res.status(409).json({ message: err.message || "Payment failed" });
+          throw err;
         } finally {
           conn.release();
         }
-      } else {
-        // PARTIAL POINTS (Not fully covered, so reduce Stripe amount)
-        pointsToDeduct = walletBalance; // User uses ALL points
-        amountToCharge = totalAmount - pointsToDeduct;
       }
     }
 
-    // 5) Stripe Checkout for Remainder
-    const amountInMinor = Math.round(amountToCharge * 100);
-
+    // Stripe Session
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       customer_email: userEmail,
-      line_items: [
-        {
-          price_data: {
-            currency: "lkr",
-            product_data: {
-              name: `${venue.name} booking` + (pointsToDeduct > 0 ? " (Partial Points)" : ""),
-            },
-            unit_amount: amountInMinor,
-          },
-          quantity: 1,
+      line_items: bookingDetails.map(b => ({
+        price_data: {
+          currency: "lkr",
+          product_data: { name: `${venue.name} (${b.time}, ${b.hours}h)` },
+          unit_amount: Math.round(b.amount * 100),
         },
-      ],
+        quantity: 1,
+      })),
       metadata: {
-        venue_id: String(venue.venue_id),
+        type: 'MULTI_BOOKING',
+        venue_id: String(venueId),
         user_id: String(userId),
-        booking_start: bookingStart,
-        booking_end: bookingEnd,
-        total_amount: String(totalAmount),
-        cancellation_policy_id: String(venue.cancellation_policy_id || ""),
-        custom_cancellation_policy: venue.custom_cancellation_policy ? String(venue.custom_cancellation_policy).substring(0, 500) : "", // Truncate if too long for metadata
-        custom_refund_percentage: String(venue.custom_refund_percentage || ""),
-        custom_hours_before_start: String(venue.custom_hours_before_start || ""),
-        invites: JSON.stringify(invites), // Store invites in metadata
-        share_amount: String(shareAmount),
-        points_to_deduct: String(pointsToDeduct),
-        points_used: String(pointsToDeduct),
-        paid_amount: String(amountToCharge),
-        owner_id: String(venue.owner_id),
+        group_data: JSON.stringify(bookingDetails.map(b => ({
+          t: b.time, h: b.hours, c: b.courtId, a: b.amount, s: b.startStr, e: b.endStr
+        }))),
         sport_id: String(sportId),
-        court_id: String(availableCourtId)
+        invites: JSON.stringify(invites),
+        total_amount: String(totalAmount),
+        owner_id: String(venue.owner_id)
       },
       success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
@@ -236,56 +208,30 @@ export const createCheckoutSession = async (req, res) => {
   }
 };
 
-/**
- * GET /api/bookings/checkout-success?session_id=...
- */
 export const handleCheckoutSuccess = async (req, res) => {
   const { session_id } = req.query;
-
-  if (!session_id) {
-    return res.status(400).json({ message: "Missing session_id" });
-  }
+  if (!session_id) return res.status(400).json({ message: "Missing session_id" });
 
   try {
     // 0) Idempotency Check
-    const existingBooking = await BookingRepository.getBookingByPaymentReference(session_id);
-    if (existingBooking) {
-      const fullBooking = await BookingRepository.getBookingWithVenue(BookingRepository.getPool(), existingBooking.booking_id);
-      return res.json({ booking: fullBooking });
+    const existing = await BookingRepository.getBookingByPaymentReference(session_id);
+    if (existing) {
+      const fullBooking = await BookingRepository.getBookingWithVenue(BookingRepository.getPool(), existing.booking_id);
+      return res.json({ success: true, booking: fullBooking });
     }
 
-    // 1) Verify with Stripe
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    if (session.payment_status !== "paid") {
-      return res.status(400).json({ message: "Payment not completed" });
-    }
+    if (session.payment_status !== "paid") return res.status(400).json({ message: "Payment not completed" });
 
-    // 2) Extract metadata
-    const {
-      venue_id, user_id, booking_start, booking_end,
-      total_amount, cancellation_policy_id, custom_cancellation_policy,
-      custom_refund_percentage, custom_hours_before_start,
-      invites, share_amount, points_to_deduct,
-      type, booking_id, owner_id, sport_id, court_id // added sport_id and court_id
-    } = session.metadata;
-
-    console.log(`[CheckoutSuccess] Session: ${session_id}, User: ${user_id}, Points: ${points_to_deduct}, Type: ${type}`);
-
-    // DEBUG: Write to file
-    // Removed as per request
+    const { type, venue_id, user_id, owner_id, sport_id, group_data, invites, total_amount, booking_id } = session.metadata;
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
 
     // === HANDLE SHARE PAYMENT ===
-    if (type === 'SHARE_PAYMENT') { // Fixed: using string literal check
+    if (type === 'SHARE_PAYMENT') {
       try {
         await SplitPaymentService.executeReimbursement(Number(user_id), Number(booking_id), Number(session.amount_total) / 100);
-        // Record Payment (Reference Stripe)
-        // We'll record it for the participant as well? executeReimbursement only records transaction logic?
-        // Actually BookingRepository.createPayment tracks payment entries
-
-        // Create Payment Record
         await BookingRepository.createPayment(conn, {
           bookingId: Number(booking_id),
           payerId: Number(user_id),
@@ -294,139 +240,88 @@ export const handleCheckoutSuccess = async (req, res) => {
           providerReference: session.id,
         });
         await BookingRepository.updatePaymentStatus(conn, session.id, 'SUCCEEDED');
-
         conn.release();
-        // Return minimal info to redirect
         return res.json({ success: true, message: "Share paid via Stripe" });
-
       } catch (err) {
         console.error("Error processing share payment", err);
-        conn.release(); // ensure release
+        conn.release();
         return res.status(500).json({ message: "Error processing payment" });
       }
     }
 
-    // === HANDLE NEW BOOKING ===
-    const inviteeList = invites ? JSON.parse(invites) : [];
-    const points = Number(points_to_deduct || 0);
+    // === HANDLE MULTI BOOKING ===
+    if (type === 'MULTI_BOOKING') {
+      const groups = JSON.parse(group_data);
+      const inviteeList = invites ? JSON.parse(invites) : [];
 
-    try {
-      await conn.beginTransaction();
+      try {
+        await conn.beginTransaction();
+        const venue = await BookingRepository.getVenueById(venue_id);
+        const bookingIds = [];
 
-      // Conflict Check
-      const hasConflict = await BookingRepository.hasBookingConflict(
-        venue_id, booking_start, booking_end, court_id
-      );
+        for (const g of groups) {
+          // Double check if a booking for this specific slot-start already exists for this session
+          const [check] = await conn.execute(
+            "SELECT 1 FROM bookings b JOIN payments p ON b.booking_id = p.booking_id WHERE p.provider_reference = ? AND b.booking_start = ?",
+            [session.id, g.s]
+          );
+          if (check.length > 0) continue;
 
-      if (hasConflict) {
+          const bookingId = await BookingRepository.createBooking(conn, {
+            venueId: Number(venue_id),
+            courtId: Number(g.c),
+            sportId: Number(sport_id),
+            userId: Number(user_id),
+            bookingStart: g.s,
+            bookingEnd: g.e,
+            totalAmount: Number(g.a),
+            cancellationPolicyId: venue.cancellation_policy_id,
+            customCancellationPolicy: venue.custom_cancellation_policy,
+            customRefundPercentage: venue.custom_refund_percentage,
+            customHoursBeforeStart: venue.custom_hours_before_start,
+            pointsUsed: 0,
+            paidAmount: Number(g.a)
+          });
+
+          const share = Number(g.a) / (inviteeList.length + 1);
+          await BookingRepository.addBookingParticipant(conn, {
+            bookingId, userId: Number(user_id), shareAmount: share, isInitiator: 1, paymentStatus: 'PAID'
+          });
+
+          await SplitPaymentService.setupBookingSplits(bookingId, user_id, inviteeList, share, conn);
+          await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+          await BookingRepository.createPayment(conn, {
+            bookingId, payerId: user_id, amount: Number(g.a), currency: "LKR", providerReference: session.id
+          });
+          bookingIds.push(bookingId);
+        }
+
+        if (owner_id) {
+          await WalletRepository.updateWalletBalance(conn, Number(owner_id), Number(total_amount));
+          await WalletRepository.createTransaction(conn, {
+            userId: Number(owner_id), amount: Number(total_amount), type: 'CREDIT',
+            description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
+            referenceType: 'BOOKING_REVENUE',
+            referenceId: bookingIds[0] // Link to first for ref
+          });
+        }
+
+        await conn.commit();
+        const firstBooking = await BookingRepository.getBookingWithVenue(conn, bookingIds[0]);
+        conn.release();
+        return res.json({ success: true, bookingIds, booking: firstBooking });
+      } catch (err) {
         await conn.rollback();
-        // refund logic (omitted for brevity)
-        return res.status(409).json({ message: "Slot booked by another user. Contact support." });
+        conn.release();
+        throw err;
       }
-
-
-
-      const paidAmount = Number(total_amount) - points;
-
-      // Create Booking
-      const bookingId = await BookingRepository.createBooking(conn, {
-        venueId: Number(venue_id),
-        courtId: Number(court_id),
-        sportId: Number(sport_id),
-        userId: Number(user_id),
-        bookingStart: booking_start,
-        bookingEnd: booking_end,
-        totalAmount: Number(total_amount),
-        cancellationPolicyId: cancellation_policy_id ? Number(cancellation_policy_id) : null,
-        customCancellationPolicy: custom_cancellation_policy || null,
-        customRefundPercentage: custom_refund_percentage ? Number(custom_refund_percentage) : null,
-        customHoursBeforeStart: custom_hours_before_start ? Number(custom_hours_before_start) : null,
-        pointsUsed: points,
-        paidAmount: paidAmount
-      });
-
-      // Update Transaction Reference if points used
-      if (points > 0) {
-        // Re-log or update transaction? 
-        // Since we already inserted, we can't easily update referenceId without ID.
-        // Better to move Deduction AFTER booking creation but BEFORE commit.
-        // Let's move deduction down.
-      }
-
-      // Add Initiator
-      await BookingRepository.addBookingParticipant(conn, {
-        bookingId,
-        userId: user_id,
-        shareAmount: Number(share_amount),
-        isInitiator: 1
-      });
-
-      // Deduct Points Logic moved here to have bookingId
-      if (points > 0) {
-        await WalletRepository.updateWalletBalance(conn, user_id, -points);
-        // Schema: transaction_id, wallet_id, booking_id, transaction_type, direction, amount, description, created_at
-        // createTransaction maps input to this schema
-        await WalletRepository.createTransaction(conn, {
-          userId: user_id,
-          amount: -points,
-          type: "DEBIT", // -> direction
-          description: "Booking payment (Points)",
-          referenceType: "BOOKING_PAYMENT", // -> transaction_type
-          referenceId: bookingId // -> booking_id
-        });
-      }
-
-      // Setup Invitees
-      // Pass 'conn' to reuse transaction (prevents lock wait timeout)
-      await SplitPaymentService.setupBookingSplits(bookingId, user_id, inviteeList, Number(share_amount), conn);
-
-      // Record Payment (Reference Stripe)
-      await BookingRepository.createPayment(conn, {
-        bookingId,
-        payerId: user_id,
-        amount: Number(session.amount_total) / 100, // Amount actually paid via card
-        currency: "LKR",
-        providerReference: session.id,
-      });
-
-      // Validations
-      await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
-      await BookingRepository.updatePaymentStatus(conn, session.id, "SUCCEEDED");
-
-      // Mark *Initiator* as PAID. 
-      await conn.execute(
-        "UPDATE booking_participants SET payment_status = 'PAID' WHERE booking_id = ? AND is_initiator = 1",
-        [bookingId]
-      );
-
-      // CREDIT OWNER (Stripe Payment)
-      if (owner_id) {
-        const ownerIdNum = Number(owner_id);
-        const revenueAmount = Number(total_amount);
-        await WalletRepository.updateWalletBalance(conn, ownerIdNum, revenueAmount);
-        await WalletRepository.createTransaction(conn, {
-          userId: ownerIdNum,
-          amount: revenueAmount,
-          type: 'CREDIT',
-          description: `Revenue from Booking #${bookingId}`,
-          referenceType: 'BOOKING_REVENUE',
-          referenceId: bookingId
-        });
-      }
-
-      const booking = await BookingRepository.getBookingWithVenue(conn, bookingId);
-      await conn.commit();
-      conn.release();
-
-      return res.json({ booking });
-    } catch (err) {
-      await conn.rollback();
-      conn.release();
-      throw err;
     }
+
+    conn.release();
+    return res.json({ message: "Processed" });
   } catch (err) {
-    console.error("Error confirming checkout", err);
-    return res.status(500).json({ message: "Server error: " + err.message });
+    console.error("Checkout Success error", err);
+    return res.status(500).json({ message: err.message });
   }
 };
 
@@ -634,8 +529,8 @@ export const rescheduleBooking = async (req, res) => {
  * POST /api/bookings/calculate-price
  */
 export const calculatePrice = async (req, res) => {
-  const { venueId, date, time, hours } = req.body;
-  if (!venueId || !date || !time || !hours) {
+  const { venueId, date, slots, time, hours } = req.body;
+  if (!venueId || !date) {
     return res.status(400).json({ message: "Missing details" });
   }
 
@@ -643,7 +538,17 @@ export const calculatePrice = async (req, res) => {
     const venue = await BookingRepository.getVenueById(venueId);
     if (!venue) return res.status(404).json({ message: "Venue not found" });
 
-    const totalAmount = await calculateDynamicPrice(venue, date, time, hours);
+    let totalAmount = 0;
+
+    if (slots && Array.isArray(slots)) {
+      const groups = groupContiguousSlots(slots);
+      for (const group of groups) {
+        totalAmount += await calculateDynamicPrice(venue, date, group.time, group.hours);
+      }
+    } else if (time && hours) {
+      totalAmount = await calculateDynamicPrice(venue, date, time, hours);
+    }
+
     res.json({ totalAmount });
   } catch (err) {
     console.error("Error calculating price:", err);
