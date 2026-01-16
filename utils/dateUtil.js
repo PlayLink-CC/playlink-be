@@ -116,8 +116,8 @@ export const getTimeValidationError = (timeString, durationHours) => {
   }
 
 
-  if (duration > 4) {
-    return "Booking cannot exceed 4 hours";
+  if (duration > 15) {
+    return "Booking cannot exceed 15 hours";
   }
 
   return null;
