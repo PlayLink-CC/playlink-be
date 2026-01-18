@@ -545,7 +545,7 @@ export const getOwnerAnalytics = async (ownerId) => {
   return {
     ...bookingStats[0],
     ...venueStats[0],
-    total_revenue: Number(walletStats[0]?.total_revenue || 0)
+    current_wallet_balance: Number(walletStats[0]?.total_revenue || 0)
   };
 };
 
@@ -835,7 +835,9 @@ export const getRevenueReport = async (ownerId, { interval, venueId, startDate, 
     SELECT 
       ${selectString},
       v.name as venue_name,
-      SUM(total_amount) as revenue,
+      SUM(CASE WHEN (b.guest_name IS NOT NULL OR b.created_by = v.owner_id) THEN b.total_amount ELSE 0 END) as walkin_revenue,
+      SUM(CASE WHEN (b.guest_name IS NULL AND b.created_by != v.owner_id) THEN b.total_amount ELSE 0 END) as online_revenue,
+      SUM(b.total_amount) as revenue,
       COUNT(*) as booking_count
     FROM bookings b
     JOIN venues v ON b.venue_id = v.venue_id

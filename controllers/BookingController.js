@@ -602,11 +602,15 @@ export const getVenueCalendarBookings = async (req, res) => {
 
 export const createWalkInBooking = async (req, res) => {
   const { venueId } = req.params;
-  const { date, time, hours, notes, type, customerName, customerEmail, sportId } = req.body; // type: 'WALK_IN' or 'BLOCK'
+  const { date, time, hours, notes, type, customerName, customerEmail, sportId, totalAmount } = req.body; // type: 'WALK_IN' or 'BLOCK'
   const userId = req.user.id;
 
   if (!venueId || !date || !time || !hours) {
     return res.status(400).json({ message: "Missing required parameters" });
+  }
+
+  if (totalAmount < 0) {
+    return res.status(400).json({ message: "Amount cannot be negative" });
   }
 
   try {
@@ -646,10 +650,10 @@ export const createWalkInBooking = async (req, res) => {
           sportId: sportId || null,
           bookingStart: startStr,
           bookingEnd: endStr,
-          totalAmount: 0,
+          totalAmount: totalAmount || 0,
           cancellationPolicyId: venue?.cancellation_policy_id || 1,
           pointsUsed: 0,
-          paidAmount: 0,
+          paidAmount: totalAmount || 0,
           guestName: customerName,
           guestEmail: customerEmail
         });
@@ -666,7 +670,7 @@ export const createWalkInBooking = async (req, res) => {
         await BookingRepository.addBookingParticipant(conn, {
           bookingId,
           userId,
-          shareAmount: 0,
+          shareAmount: totalAmount || 0,
           isInitiator: 1
         });
 
