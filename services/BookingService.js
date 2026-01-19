@@ -302,7 +302,7 @@ export const getAvailableTimeSlots = async (venueId, date, hours, sportId) => {
         const m = time % 60;
         const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 
-        const startDateTime = new Date(`${date}T${timeStr}:00`);
+        const startDateTime = DateUtil.createISTDate(date, timeStr);
         const endDateTime = new Date(startDateTime.getTime() + duration * 60 * 60 * 1000);
 
         if (startDateTime <= now) {
@@ -315,10 +315,12 @@ export const getAvailableTimeSlots = async (venueId, date, hours, sportId) => {
 
         for (const court of courts) {
             // Check if THIS specific court is free
-            const courtConflicts = allSlots.filter(s =>
-                (s.court_id === court.court_id || s.court_id === null) &&
-                (startDateTime < new Date(s.booking_end) && endDateTime > new Date(s.booking_start))
-            );
+            const courtConflicts = allSlots.filter(s => {
+                const bStart = new Date(s.booking_start);
+                const bEnd = new Date(s.booking_end);
+                return (s.court_id === court.court_id || s.court_id === null) &&
+                    (startDateTime < bEnd && endDateTime > bStart);
+            });
 
             if (courtConflicts.length === 0) {
                 isAnyCourtFree = true;
@@ -347,17 +349,19 @@ export const findAvailableCourt = async (venueId, startStr, endStr, sportId, exc
     const courts = await CourtRepository.getCourtsByVenueAndSport(venueId, sportId);
     if (courts.length === 0) return null;
 
-    const start = new Date(startStr);
-    const end = new Date(endStr);
+    const start = new Date(startStr + "Z");
+    const end = new Date(endStr + "Z");
 
     const allSlots = await BookingRepository.getBookedSlotsForDate(venueId, startStr.split(' ')[0]);
 
     for (const court of courts) {
-        const courtConflicts = allSlots.filter(s =>
-            (s.court_id === court.court_id || s.court_id === null) &&
-            (s.booking_id !== excludeBookingId) &&
-            (start < new Date(s.booking_end) && end > new Date(s.booking_start))
-        );
+        const courtConflicts = allSlots.filter(s => {
+            const bStart = new Date(s.booking_start);
+            const bEnd = new Date(s.booking_end);
+            return (s.court_id === court.court_id || s.court_id === null) &&
+                (s.booking_id !== excludeBookingId) &&
+                (start < bEnd && end > bStart);
+        });
 
         if (courtConflicts.length === 0) {
             return court.court_id;
