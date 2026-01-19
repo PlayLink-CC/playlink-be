@@ -835,8 +835,14 @@ export const getRevenueReport = async (ownerId, { interval, venueId, startDate, 
     SELECT 
       ${selectString},
       v.name as venue_name,
-      SUM(CASE WHEN (b.guest_name IS NOT NULL OR b.created_by = v.owner_id) THEN b.total_amount ELSE 0 END) as walkin_revenue,
-      SUM(CASE WHEN (b.guest_name IS NULL AND b.created_by != v.owner_id) THEN b.total_amount ELSE 0 END) as online_revenue,
+      SUM(CASE 
+        WHEN (b.guest_name IS NOT NULL OR b.created_by = v.owner_id OR b.user_id = v.owner_id) 
+        THEN b.total_amount ELSE 0 
+      END) as walkin_revenue,
+      SUM(CASE 
+        WHEN (b.guest_name IS NULL AND (b.created_by != v.owner_id OR b.created_by IS NULL) AND (b.user_id != v.owner_id OR b.user_id IS NULL)) 
+        THEN b.total_amount ELSE 0 
+      END) as online_revenue,
       SUM(b.total_amount) as revenue,
       COUNT(*) as booking_count
     FROM bookings b
