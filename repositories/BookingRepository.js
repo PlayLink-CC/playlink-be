@@ -107,15 +107,48 @@ export const addBookingParticipant = async (conn, {
  * 
  * @param {number} userId 
  * @param {string} email 
+ * @returns {Promise<number[]>} Array of booking IDs that were linked
  */
 export const linkGuestBookings = async (userId, email) => {
-  // Update any participant records where guest_email matches and user_id is NULL
+  // 1. Find which bookings will be linked
+  const [rows] = await pool.execute(
+    "SELECT booking_id FROM booking_participants WHERE guest_email = ? AND user_id IS NULL",
+    [email]
+  );
+
+  if (rows.length === 0) return [];
+
+  const bookingIds = rows.map(r => r.booking_id);
+
+  // 2. Update participant records
   await pool.execute(
     `UPDATE booking_participants 
          SET user_id = ?, guest_email = NULL, invite_token = NULL 
          WHERE guest_email = ? AND user_id IS NULL`,
     [userId, email]
   );
+
+  return bookingIds;
+};
+
+/**
+ * Get initiator names for a list of bookings
+ * 
+ * @param {number[]} bookingIds 
+ * @returns {Promise<Object[]>} Array of { booking_id, full_name }
+ */
+export const getBookingInitiators = async (bookingIds) => {
+  if (!bookingIds || bookingIds.length === 0) return [];
+
+  const placeholders = bookingIds.map(() => '?').join(',');
+  const [rows] = await pool.execute(
+    `SELECT bp.booking_id, u.full_name 
+     FROM booking_participants bp
+     JOIN users u ON bp.user_id = u.user_id
+     WHERE bp.booking_id IN (${placeholders}) AND bp.is_initiator = 1`,
+    bookingIds
+  );
+  return rows;
 };
 
 /**

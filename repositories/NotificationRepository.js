@@ -6,13 +6,15 @@ import pool from "../config/dbconnection.js";
  * @param {number} userId 
  * @param {string} message 
  * @param {string} type 
+ * @param {Object} [connection] - Optional database connection/transaction
  */
-export const createNotification = async (userId, message, type = 'GENERAL') => {
+export const createNotification = async (userId, message, type = 'GENERAL', connection = null) => {
     const sql = `
         INSERT INTO notifications (user_id, message, type)
         VALUES (?, ?, ?)
     `;
-    const [result] = await pool.execute(sql, [userId, message, type]);
+    const db = connection || pool;
+    const [result] = await db.execute(sql, [userId, message, type]);
     return result.insertId;
 };
 

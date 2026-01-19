@@ -139,7 +139,20 @@ export const registerUser = async ({
 
   // Link any pending guest bookings/splits to this new user
   try {
-    await bookingRepository.linkGuestBookings(newUser.user_id, newUser.email);
+    const linkedBookingIds = await bookingRepository.linkGuestBookings(newUser.user_id, newUser.email);
+
+    if (linkedBookingIds.length > 0) {
+      const initiators = await bookingRepository.getBookingInitiators(linkedBookingIds);
+
+      const linkingNotifications = initiators.map(init =>
+        NotificationRepository.createNotification(
+          newUser.user_id,
+          `${init.full_name} had invited you to split a booking. It's now linked to your account! Check "My Bookings" to pay your share.`,
+          "BOOKING_ALERT"
+        )
+      );
+      await Promise.all(linkingNotifications);
+    }
   } catch (err) {
     console.error("Error linking guest bookings during registration:", err);
     // Don't fail registration if linking fails, just log logic error
