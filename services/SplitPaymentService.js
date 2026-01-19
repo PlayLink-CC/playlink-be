@@ -12,6 +12,7 @@
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as UserRepository from "../repositories/UserRepository.js";
 import * as WalletRepository from "../repositories/WalletRepository.js";
+import * as NotificationRepository from "../repositories/NotificationRepository.js";
 import pool from "../config/dbconnection.js";
 
 /**
@@ -53,6 +54,10 @@ export const setupBookingSplits = async (bookingId, initiatorId, inviteeEmails, 
             await conn.beginTransaction();
         }
 
+        // 0. Fetch Initiator Name for notifications
+        const [initiatorRows] = await conn.execute("SELECT full_name FROM users WHERE user_id = ?", [initiatorId]);
+        const initiatorName = initiatorRows[0]?.full_name || "A friend";
+
         // 1. Resolve Emails to User IDs
         const existingUsers = await UserRepository.findIdsByEmails(inviteeEmails);
         const existingEmails = new Set(existingUsers.map(u => u.email));
@@ -67,6 +72,14 @@ export const setupBookingSplits = async (bookingId, initiatorId, inviteeEmails, 
                 shareAmount: shareAmount,
                 isInitiator: 0
             });
+
+            // Notify participant
+            await NotificationRepository.createNotification(
+                user.user_id,
+                `${initiatorName} has invited you to split a booking. Your share is LKR ${shareAmount}. Please pay from "My Bookings" to confirm.`,
+                'BOOKING_ALERT',
+                conn
+            );
         }
 
         // 3. Handle Guest Users (Emails not found in DB)
@@ -176,6 +189,14 @@ export const executeReimbursement = async (participantUserId, bookingId, amountP
             referenceType: "BOOKING_REIMBURSEMENT",
             referenceId: bookingId
         });
+
+        // 5. Notify the Initiator (Main Booker)
+        await NotificationRepository.createNotification(
+            initiatorId,
+            `${payerName} has paid their share of LKR ${amountPaid} for Booking #${bookingId}.`,
+            'PAYMENT',
+            conn
+        );
 
         await conn.commit();
         return true;
