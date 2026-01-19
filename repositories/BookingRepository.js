@@ -542,9 +542,11 @@ export const getOwnerAnalytics = async (ownerId) => {
     [ownerId]
   );
 
+  // Fix: Force BigInts/Decimals to Numbers to prevent "TypeError: Do not know how to serialize a BigInt"
   return {
-    ...bookingStats[0],
-    ...venueStats[0],
+    total_bookings: Number(bookingStats[0]?.total_bookings || 0),
+    active_venues: Number(venueStats[0]?.active_venues || 0),
+    total_revenue: Number(walletStats[0]?.total_revenue || 0),
     current_wallet_balance: Number(walletStats[0]?.total_revenue || 0)
   };
 };
@@ -652,7 +654,7 @@ export const countActiveBookings = async (venueId) => {
      AND booking_end > NOW()`,
     [venueId]
   );
-  return rows[0].count;
+  return Number(rows[0].count);
 };
 
 /**
@@ -773,8 +775,8 @@ export const getRevenueAnalytics = async (ownerId) => {
   );
 
   return {
-    revenueByVenue,
-    monthlyRevenue
+    revenueByVenue: revenueByVenue.map(r => ({ ...r, value: Number(r.value) })),
+    monthlyRevenue: monthlyRevenue.map(r => ({ ...r, revenue: Number(r.revenue) }))
   };
 };
 
@@ -836,11 +838,11 @@ export const getRevenueReport = async (ownerId, { interval, venueId, startDate, 
       ${selectString},
       v.name as venue_name,
       SUM(CASE 
-        WHEN (b.guest_name IS NOT NULL OR b.created_by = v.owner_id OR b.user_id = v.owner_id) 
+        WHEN (b.guest_name IS NOT NULL OR b.created_by = v.owner_id) 
         THEN b.total_amount ELSE 0 
       END) as walkin_revenue,
       SUM(CASE 
-        WHEN (b.guest_name IS NULL AND (b.created_by != v.owner_id OR b.created_by IS NULL) AND (b.user_id != v.owner_id OR b.user_id IS NULL)) 
+        WHEN (b.guest_name IS NULL AND b.created_by != v.owner_id) 
         THEN b.total_amount ELSE 0 
       END) as online_revenue,
       SUM(b.total_amount) as revenue,
@@ -862,7 +864,13 @@ export const getRevenueReport = async (ownerId, { interval, venueId, startDate, 
   query += ` GROUP BY ${groupByString}, v.name ORDER BY MIN(booking_start) ASC`;
 
   const [rows] = await pool.execute(query, params);
-  return rows;
+  return rows.map(r => ({
+    ...r,
+    walkin_revenue: Number(r.walkin_revenue),
+    online_revenue: Number(r.online_revenue),
+    revenue: Number(r.revenue),
+    booking_count: Number(r.booking_count)
+  }));
 };
 
 export const getPeakBookingHours = async (ownerId, startDate, endDate) => {
@@ -892,5 +900,8 @@ export const getPeakBookingHours = async (ownerId, startDate, endDate) => {
       ORDER BY hour_of_day ASC
     `;
   const [rows] = await pool.execute(query, params);
-  return rows;
+  return rows.map(r => ({
+    ...r,
+    booking_count: Number(r.booking_count)
+  }));
 };
