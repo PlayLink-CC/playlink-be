@@ -87,6 +87,20 @@ export const fetchAmenities = async (req, res) => {
 };
 
 /**
+ * Fetch all cancellation policies
+ * GET /api/venues/policies
+ */
+export const fetchPolicies = async (req, res) => {
+  try {
+    const policies = await VenueRepository.getAllPolicies();
+    res.json(policies);
+  } catch (err) {
+    console.error("Error fetching policies:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
  * Fetch top 4 most booked venues from the past 7 days
  *
  * Returns venues sorted by booking count for the current week.
