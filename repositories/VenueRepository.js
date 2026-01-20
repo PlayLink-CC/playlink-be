@@ -69,7 +69,8 @@ export const findAllVenues = async () => {
         v.price_per_hour,
         vi.image_url AS primary_image,
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
-        v.description
+        v.description,
+        COALESCE(AVG(r.rating), 0) AS avg_rating
     FROM venues v
     LEFT JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
     LEFT JOIN court_sports cs ON cs.court_id = c.court_id
@@ -77,6 +78,7 @@ export const findAllVenues = async () => {
     LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
     LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
     LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
+    LEFT JOIN reviews r ON r.venue_id = v.venue_id
     GROUP BY 
         v.venue_id,
         v.name,
@@ -87,7 +89,12 @@ export const findAllVenues = async () => {
   `;
 
     const [rows] = await connectDB.execute(sql);
-    return rows;
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0)
+    }));
 };
 
 /**
@@ -107,7 +114,8 @@ export const findVenuesByCity = async (city, limit = 4) => {
         v.price_per_hour,
         vi.image_url AS primary_image,
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
-        v.description
+        v.description,
+        COALESCE(AVG(r.rating), 0) AS avg_rating
     FROM venues v
     LEFT JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
     LEFT JOIN court_sports cs ON cs.court_id = c.court_id
@@ -115,6 +123,7 @@ export const findVenuesByCity = async (city, limit = 4) => {
     LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
     LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
     LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
+    LEFT JOIN reviews r ON r.venue_id = v.venue_id
     WHERE v.city = ? AND v.is_active = 1
     GROUP BY 
         v.venue_id,
@@ -127,7 +136,12 @@ export const findVenuesByCity = async (city, limit = 4) => {
   `;
 
     const [rows] = await connectDB.execute(sql, [city, limit]);
-    return rows;
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0)
+    }));
 };
 
 /**
@@ -151,7 +165,8 @@ export const findVenuesBySportsAndCity = async (sportIds, city, limit = 4) => {
         v.price_per_hour,
         vi.image_url AS primary_image,
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
-        v.description
+        v.description,
+        COALESCE(AVG(r.rating), 0) AS avg_rating
     FROM venues v
     JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
     JOIN court_sports cs ON cs.court_id = c.court_id
@@ -159,6 +174,7 @@ export const findVenuesBySportsAndCity = async (sportIds, city, limit = 4) => {
     LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
     LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
     LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
+    LEFT JOIN reviews r ON r.venue_id = v.venue_id
     WHERE v.city = ? AND v.is_active = 1 AND s.sport_id IN (${placeholders})
     GROUP BY 
         v.venue_id,
@@ -172,7 +188,12 @@ export const findVenuesBySportsAndCity = async (sportIds, city, limit = 4) => {
   `;
 
     const [rows] = await connectDB.execute(sql, [city, ...sportIds, ...sportIds, limit]);
-    return rows;
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0)
+    }));
 };
 
 /**
@@ -202,13 +223,16 @@ export const findMostBookedVenuesThisWeek = async () => {
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR ', ') AS amenities,
         GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS court_types,
         v.description,
-        COUNT(b.booking_id) AS bookings_this_week
+        COALESCE(AVG(r.rating), 0) AS avg_rating,
+        COUNT(DISTINCT b.booking_id) AS total_bookings
     FROM venues v
     LEFT JOIN bookings b 
         ON b.venue_id = v.venue_id
        AND b.booking_start >= DATE_SUB(NOW(), INTERVAL 7 DAY)
        AND b.booking_start < NOW()
        AND b.status IN ('CONFIRMED', 'COMPLETED')
+    LEFT JOIN reviews r
+        ON r.venue_id = v.venue_id
     LEFT JOIN venue_images vi
         ON vi.venue_id = v.venue_id
        AND vi.is_primary = 1
@@ -231,12 +255,18 @@ export const findMostBookedVenuesThisWeek = async () => {
         v.price_per_hour,
         vi.image_url,
         v.description
-    ORDER BY bookings_this_week DESC
+    ORDER BY total_bookings DESC
     LIMIT 4;
   `;
 
     const [rows] = await connectDB.execute(sql);
-    return rows;
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0),
+        total_bookings: Number(venue.total_bookings || 0)
+    }));
 };
 
 /**
@@ -272,7 +302,8 @@ export const findVenuesBySearch = async (searchText) => {
         v.price_per_hour,
         vi.image_url AS primary_image,
         GROUP_CONCAT(DISTINCT a.name ORDER BY a.name) AS amenities,
-        v.description
+        v.description,
+        COALESCE(AVG(r.rating), 0) AS avg_rating
     FROM venues v
     LEFT JOIN courts c ON c.venue_id = v.venue_id AND c.is_active = 1
     LEFT JOIN court_sports cs ON cs.court_id = c.court_id
@@ -280,6 +311,7 @@ export const findVenuesBySearch = async (searchText) => {
     LEFT JOIN venue_images vi ON vi.venue_id = v.venue_id AND vi.is_primary = 1
     LEFT JOIN venue_amenities va ON va.venue_id = v.venue_id
     LEFT JOIN amenities a ON a.amenity_id = va.amenity_id
+    LEFT JOIN reviews r ON r.venue_id = v.venue_id
     WHERE v.name LIKE ? 
        OR v.address LIKE ? 
        OR v.city LIKE ? 
@@ -300,7 +332,12 @@ export const findVenuesBySearch = async (searchText) => {
         searchPattern,
         searchPattern,
     ]);
-    return rows;
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0)
+    }));
 };
 
 /**
@@ -586,7 +623,13 @@ export const findVenuesByOwner = async (ownerId) => {
         ORDER BY v.created_at DESC
     `;
     const [rows] = await connectDB.execute(sql, [ownerId]);
-    return rows;
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0),
+        review_count: Number(venue.review_count || 0)
+    }));
 };
 
 /**
@@ -658,7 +701,15 @@ export const findVenueById = async (venueId) => {
         hours_before_start
     `;
     const [rows] = await connectDB.execute(sql, [venueId]);
-    return rows[0];
+    const venue = rows[0];
+
+    if (venue) {
+        // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+        venue.avg_rating = Number(venue.avg_rating || 0);
+        venue.review_count = Number(venue.review_count || 0);
+    }
+
+    return venue;
 };
 
 /**
