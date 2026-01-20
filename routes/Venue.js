@@ -45,6 +45,7 @@ router.post("/", authenticate, authorize(["VENUE_OWNER"]), VenueController.creat
 router.get("/my-venues", authenticate, authorize(["VENUE_OWNER"]), VenueController.fetchMyVenues);
 
 router.get("/amenities", VenueController.fetchAmenities);
+router.get("/policies", VenueController.fetchPolicies);
 router.get("/:id", VenueController.fetchVenueById);
 router.get("/:id/sports", VenueController.fetchVenueSports);
 router.put("/:id", authenticate, authorize(["VENUE_OWNER"]), VenueController.update);

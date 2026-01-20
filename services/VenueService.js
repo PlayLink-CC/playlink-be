@@ -317,3 +317,7 @@ export const deleteVenueReview = async (reviewId, userId) => {
   }
   return true;
 };
+
+export const getAllPolicies = async () => {
+  return await VenueRepository.getAllPolicies();
+};
