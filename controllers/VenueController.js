@@ -449,6 +449,10 @@ export const addPricingRule = async (req, res) => {
     return res.status(400).json({ message: "Missing required fields" });
   }
 
+  if (Number(multiplier) < 1) {
+    return res.status(400).json({ message: "Price multiplier must be at least 1.0" });
+  }
+
   try {
     const ruleId = await addVenuePricingRule({
       venueId: id,
