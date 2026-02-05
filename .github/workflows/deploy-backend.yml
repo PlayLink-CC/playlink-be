@@ -1,7 +1,7 @@
 name: Deploy Backend to AWS
 on:
   push:
-    branches: [ main ] # Runs every time you push to the main branch
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -18,7 +18,18 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /home/ubuntu/playlink-be
+            
+            # 1. Sync code with GitHub
             git fetch --all
             git reset --hard origin/main
+            
+            # 2. Install dependencies
             npm install --production
-            pm2 restart playlink-be
+            
+            # 3. Smart Restart
+            # This tries to restart by name; if it fails, it starts by filename.
+            # --update-env is CRITICAL to load your Stripe keys from the .env file.
+            sudo -u ubuntu pm2 restart playlink-be --update-env || sudo -u ubuntu pm2 start server.js --name "playlink-be" --update-env
+            
+            # 4. Save the PM2 state
+            sudo -u ubuntu pm2 save
