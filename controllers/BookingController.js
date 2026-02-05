@@ -762,34 +762,20 @@ export const paySplitShare = async (req, res) => {
       return res.json({ success: true, message: "Share paid successfully" });
 
     } else {
-      // Stripe flow for split share - Use Checkout Session
-      const session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        payment_method_types: ["card"],
-        customer_email: req.user.email,
-        line_items: [
-          {
-            price_data: {
-              currency: "lkr",
-              product_data: {
-                name: `Share Payment for Booking #${bookingId}`,
-              },
-              unit_amount: Math.round(amountToPay * 100),
-            },
-            quantity: 1,
-          },
-        ],
+      // Stripe flow for split share - Use PaymentIntent for embedded flow
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(amountToPay * 100),
+        currency: "lkr",
+        automatic_payment_methods: { enabled: true },
         metadata: {
           type: 'SHARE_PAYMENT',
           booking_id: String(bookingId),
           user_id: String(userId),
         },
-        success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
       });
 
       conn.release();
-      return res.json({ checkoutUrl: session.url });
+      return res.json({ clientSecret: paymentIntent.client_secret, amount: amountToPay });
     }
 
   } catch (err) {
