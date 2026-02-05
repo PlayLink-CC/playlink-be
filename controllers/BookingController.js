@@ -370,17 +370,31 @@ export const createPaymentIntent = async (req, res) => {
       });
     }
 
+    let pointsUsed = 0;
+    let stripeAmount = totalAmount;
+
     if (useWallet) {
-      // Implement Wallet logic for PaymentIntent flow if needed, 
-      // essentially similar to createCheckoutSession's wallet logic but we might return success immediately.
-      // For now, let's assume this endpoint is specifically for CARD/Stripe flow. 
-      // If useWallet passed here, we could divert? 
-      // But frontend handles "Pay with Points" separately likely.
+      const walletBalance = await WalletRepository.getWalletBalance(userId);
+      if (walletBalance > 0) {
+        pointsUsed = Math.min(walletBalance, totalAmount);
+        stripeAmount = totalAmount - pointsUsed;
+      }
     }
 
-    // Create PaymentIntent
+    // If fully covered by points, frontend should call confirmBookingWithPoints, but if they call this, we can signal it.
+    if (stripeAmount <= 0) {
+      return res.json({
+        clientSecret: null,
+        amount: 0,
+        pointsUsed: totalAmount,
+        message: "Full payment covered by points",
+        fullyCovered: true
+      });
+    }
+
+    // Create PaymentIntent for the remainder
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(totalAmount * 100),
+      amount: Math.round(stripeAmount * 100),
       currency: "lkr",
       automatic_payment_methods: { enabled: true },
       metadata: {
@@ -393,11 +407,12 @@ export const createPaymentIntent = async (req, res) => {
         sport_id: String(sportId),
         invites: JSON.stringify(invites),
         total_amount: String(totalAmount),
+        points_used: String(pointsUsed), // Store points used
         owner_id: String(venue.owner_id)
       }
     });
 
-    res.json({ clientSecret: paymentIntent.client_secret, amount: totalAmount });
+    res.json({ clientSecret: paymentIntent.client_secret, amount: stripeAmount, pointsUsed, fullyCovered: false });
 
   } catch (err) {
     console.error("Error creating PaymentIntent", err);
@@ -416,7 +431,10 @@ export const confirmBookingWithIntent = async (req, res) => {
       return res.status(400).json({ message: "Payment not succeeded yet" });
     }
 
-    const { type, venue_id, user_id, start_str, end_str, court_id, sport_id, total_amount, group_data, invites, owner_id } = paymentIntent.metadata;
+    const { type, venue_id, user_id, start_str, end_str, court_id, sport_id, total_amount, group_data, invites, owner_id, points_used } = paymentIntent.metadata;
+
+    const pointsUsedVal = points_used ? Number(points_used) : 0;
+    const totalAmountVal = Number(total_amount);
 
     // Idempotency: Check if booking exists for this PI
     const existing = await BookingRepository.getBookingByPaymentReference(paymentIntent.id);
@@ -434,8 +452,22 @@ export const confirmBookingWithIntent = async (req, res) => {
 
       const groups = JSON.parse(group_data);
       const inviteeList = invites ? JSON.parse(invites) : [];
+      const numberOfBookings = groups.length;
 
-      for (const g of groups) {
+      // Distribute points usage across bookings (proportional)
+      // Or simpler: Assign all points to first booking? No, proportional is safer for refunds.
+      // Actually, let's just create them. `createBooking` accepts `pointsUsed`.
+      // We can distribute points equally per LKR amount.
+
+      // Total calculated from groups might differ slightly from total_amount due to rounding? 
+      // Use total_amount from metadata as source of truth.
+
+      for (let i = 0; i < groups.length; i++) {
+        const g = groups[i];
+        const ratio = Number(g.a) / totalAmountVal;
+        const pointsForThis = pointsUsedVal * ratio;
+        const cashForThis = Number(g.a) - pointsForThis;
+
         const bookingId = await BookingRepository.createBooking(conn, {
           venueId: Number(venue_id),
           courtId: Number(g.c),
@@ -448,8 +480,8 @@ export const confirmBookingWithIntent = async (req, res) => {
           customCancellationPolicy: venue.custom_cancellation_policy,
           customRefundPercentage: venue.custom_refund_percentage,
           customHoursBeforeStart: venue.custom_hours_before_start,
-          pointsUsed: 0,
-          paidAmount: Number(g.a)
+          pointsUsed: pointsForThis,
+          paidAmount: cashForThis
         });
 
         const share = Number(g.a) / (inviteeList.length + 1);
@@ -460,9 +492,21 @@ export const confirmBookingWithIntent = async (req, res) => {
         await SplitPaymentService.setupBookingSplits(bookingId, Number(user_id), inviteeList, share, conn);
         await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
         await BookingRepository.createPayment(conn, {
-          bookingId, payerId: Number(user_id), amount: Number(g.a), currency: "LKR", providerReference: paymentIntent.id
+          bookingId, payerId: Number(user_id), amount: cashForThis, currency: "LKR", providerReference: paymentIntent.id
         });
         bookingIds.push(bookingId);
+      }
+
+      // Deduct points if used
+      if (pointsUsedVal > 0) {
+        await WalletRepository.updateWalletBalance(conn, Number(user_id), -pointsUsedVal);
+        await WalletRepository.createTransaction(conn, {
+          userId: Number(user_id),
+          amount: -pointsUsedVal,
+          type: "DEBIT",
+          description: `Part-payment (Points) for Booking IDs: ${bookingIds.join(',')}`,
+          referenceType: "BOOKING_PAYMENT_PARTIAL"
+        });
       }
 
       if (owner_id) {
@@ -487,6 +531,111 @@ export const confirmBookingWithIntent = async (req, res) => {
 
   } catch (err) {
     console.error("Error confirming booking", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const confirmBookingWithPoints = async (req, res) => {
+  const userId = req.user.id;
+  const { venueId, date, slots, sportId, invites: rawInvites = [] } = req.body;
+  const invites = rawInvites.filter(email => email !== req.user.email);
+
+  if (!venueId || !date || !slots || !slots.length) {
+    return res.status(400).json({ message: "Missing booking details" });
+  }
+
+  try {
+    const conn = await BookingRepository.getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const venue = await BookingRepository.getVenueById(venueId);
+      const groups = groupContiguousSlots(slots);
+      let totalAmount = 0;
+      const bookingDetails = [];
+
+      // 1. Calculate and Reserve
+      for (const group of groups) {
+        const { time, hours } = group;
+        const start = createISTDate(date, time);
+        const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+        const startStr = toMySQLDateTime(start);
+        const endStr = toMySQLDateTime(end);
+
+        // Availability check
+        const availableCourtId = await BookingService.findAvailableCourt(venueId, startStr, endStr, sportId);
+        if (!availableCourtId) {
+          await conn.rollback();
+          return res.status(409).json({ message: `Slot ${time} unavailable.` });
+        }
+
+        const amount = await calculateDynamicPrice(venue, date, time, hours);
+        totalAmount += amount;
+        bookingDetails.push({ time, hours, startStr, endStr, courtId: availableCourtId, amount });
+      }
+
+      // 2. Check Balance
+      const walletBalance = await WalletRepository.getWalletBalance(userId);
+      if (walletBalance < totalAmount) {
+        await conn.rollback();
+        return res.status(400).json({ message: "Insufficient points balance." });
+      }
+
+      // 3. Deduct Points
+      await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
+      await WalletRepository.createTransaction(conn, {
+        userId, amount: -totalAmount, type: 'DEBIT',
+        description: `Booking Payment (Points) for ${venue.name}`, referenceType: 'BOOKING_PAYMENT_FULL'
+      });
+
+      // 4. Create Bookings
+      const bookingIds = [];
+      for (const b of bookingDetails) {
+        const bookingId = await BookingRepository.createBooking(conn, {
+          venueId, courtId: b.courtId, sportId: Number(sportId), userId,
+          bookingStart: b.startStr, bookingEnd: b.endStr,
+          totalAmount: b.amount,
+          cancellationPolicyId: venue.cancellation_policy_id,
+          customCancellationPolicy: venue.custom_cancellation_policy,
+          customRefundPercentage: venue.custom_refund_percentage,
+          customHoursBeforeStart: venue.custom_hours_before_start,
+          pointsUsed: b.amount,
+          paidAmount: 0 // Cash paid is 0
+        });
+
+        const share = b.amount / (invites.length + 1);
+        await BookingRepository.addBookingParticipant(conn, {
+          bookingId, userId, shareAmount: share, isInitiator: 1, paymentStatus: 'PAID'
+        });
+        await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, share, conn);
+        await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+        await BookingRepository.createPayment(conn, {
+          bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_FULL_${Date.now()}`
+        });
+        bookingIds.push(bookingId);
+      }
+
+      // 5. Credit Owner
+      if (venue.owner_id) {
+        await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
+        await WalletRepository.createTransaction(conn, {
+          userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
+          description: `Revenue (Points) Booking IDs: ${bookingIds.join(',')}`,
+          referenceType: 'BOOKING_REVENUE', referenceId: bookingIds[0]
+        });
+      }
+
+      await conn.commit();
+      res.json({ success: true, bookingIds });
+
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };

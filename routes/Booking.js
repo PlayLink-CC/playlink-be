@@ -14,7 +14,8 @@ import {
   getVenueCalendarBookings,
   createWalkInBooking,
   createPaymentIntent,
-  confirmBookingWithIntent
+  confirmBookingWithIntent,
+  confirmBookingWithPoints
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -25,6 +26,7 @@ router.get("/checkout-success", authMiddleware, authorize(['PLAYER']), handleChe
 router.post("/pay-split-share", authMiddleware, authorize(['PLAYER']), paySplitShare);
 router.post("/create-payment-intent", authMiddleware, authorize(['PLAYER']), createPaymentIntent);
 router.post("/confirm-payment", authMiddleware, authorize(['PLAYER']), confirmBookingWithIntent);
+router.post("/confirm-points-booking", authMiddleware, authorize(['PLAYER']), confirmBookingWithPoints);
 
 // Booking Management - Players
 router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER', 'VENUE_OWNER']), cancelBooking);
