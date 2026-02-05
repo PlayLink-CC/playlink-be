@@ -166,3 +166,16 @@ export const findOwnersByCity = async (city, excludeUserId = null) => {
   const [rows] = await connectDB.execute(sql, params);
   return rows;
 };
+
+/**
+ * Find venue ID associated with an employee
+ * 
+ * @async
+ * @param {number} userId 
+ * @returns {Promise<number|null>} Venue ID or null if not found
+ */
+export const findEmployeeVenue = async (userId) => {
+  const sql = `SELECT venue_id FROM employee_venue WHERE user_id = ?`;
+  const [rows] = await connectDB.execute(sql, [userId]);
+  return rows.length > 0 ? rows[0].venue_id : null;
+};
