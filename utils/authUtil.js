@@ -72,6 +72,7 @@ export const createToken = (user) => {
     accountType: user.accountType,
     fullName: user.fullName,
     city: user.city,
+    venueId: user.venueId, // Include venueId in token if present
   };
 
   return sign(payload);

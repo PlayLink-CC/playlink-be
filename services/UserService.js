@@ -82,6 +82,11 @@ export const logInUser = async (email, plainPassword) => {
     throw new Error("Invalid credentials");
   }
 
+  let venueId = null;
+  if (user.account_type === "EMPLOYEE") {
+    venueId = await userRepository.findEmployeeVenue(user.user_id);
+  }
+
   return {
     id: user.user_id,
     fullName: user.full_name,
@@ -89,6 +94,7 @@ export const logInUser = async (email, plainPassword) => {
     phone: user.phone,
     city: user.city,
     accountType: user.account_type,
+    venueId: venueId, // Add venueId to the returned user object
     createdAt: user.created_at,
     updatedAt: user.updated_at,
   };

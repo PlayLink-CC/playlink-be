@@ -21,6 +21,7 @@ import analyticsRoutes from "./Analytics.js";
 import walletRoutes from "./Wallet.js";
 import policyRoutes from "./Policy.js";
 import notificationRoutes from "./Notification.js";
+import employeeRoutes from "./Employee.js";
 
 const router = express.Router();
 
@@ -32,5 +33,6 @@ router.use("/analytics", analyticsRoutes);
 router.use("/wallet", walletRoutes);
 router.use("/policies", policyRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/employee", employeeRoutes);
 
 export default router;

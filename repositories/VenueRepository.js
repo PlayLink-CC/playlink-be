@@ -633,6 +633,46 @@ export const findVenuesByOwner = async (ownerId) => {
 };
 
 /**
+ * Find venues assigned to an employee
+ * 
+ * @async
+ * @param {number} employeeId
+ * @returns {Promise<Object[]>} Array of venues
+ */
+export const findVenuesByEmployee = async (employeeId) => {
+    const sql = `
+        SELECT 
+            v.venue_id,
+            v.name AS venue_name,
+            v.address,
+            v.city,
+            v.price_per_hour,
+            v.is_active,
+            vi.image_url AS primary_image,
+            COALESCE(AVG(r.rating), 0) AS avg_rating,
+            COUNT(DISTINCT r.review_id) AS review_count
+        FROM venues v
+        JOIN employee_venue ev ON ev.venue_id = v.venue_id
+        LEFT JOIN venue_images vi 
+            ON vi.venue_id = v.venue_id
+            AND vi.is_primary = 1
+        LEFT JOIN reviews r
+            ON r.venue_id = v.venue_id
+        WHERE ev.user_id = ?
+        GROUP BY v.venue_id, v.name, v.address, v.city, v.price_per_hour, v.is_active, vi.image_url
+        ORDER BY v.created_at DESC
+    `;
+    const [rows] = await connectDB.execute(sql, [employeeId]);
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0),
+        review_count: Number(venue.review_count || 0)
+    }));
+};
+
+/**
  * Find a specific venue by ID
  * 
  * @async
@@ -798,11 +838,62 @@ export const addPricingRule = async ({ venueId, name, startTime, endTime, multip
 
 /**
  * Get pricing rules for a venue
+ * @param {number} venueId 
+ * @returns {Promise<Object[]>}
  */
 export const getPricingRules = async (venueId) => {
     const [rows] = await connectDB.execute("SELECT * FROM venue_pricing_rules WHERE venue_id = ?", [venueId]);
     return rows;
 };
+
+/**
+ * Add staff member to venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @param {number} userId
+ * @returns {Promise<void>}
+ */
+export const addStaff = async (venueId, userId) => {
+    await connectDB.execute(
+        "INSERT INTO employee_venue (venue_id, user_id) VALUES (?, ?)",
+        [venueId, userId]
+    );
+};
+
+/**
+ * Remove staff member from venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @param {number} userId
+ * @returns {Promise<void>}
+ */
+export const removeStaff = async (venueId, userId) => {
+    await connectDB.execute(
+        "DELETE FROM employee_venue WHERE venue_id = ? AND user_id = ?",
+        [venueId, userId]
+    );
+};
+
+/**
+ * Get all staff for a venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<Object[]>}
+ */
+export const getStaff = async (venueId) => {
+    const sql = `
+    SELECT u.user_id, u.full_name, u.email, u.phone, u.city 
+    FROM users u
+    JOIN employee_venue ev ON ev.user_id = u.user_id
+    WHERE ev.venue_id = ?
+  `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows;
+};
+
 
 /**
  * Delete a pricing rule

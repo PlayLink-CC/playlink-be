@@ -42,7 +42,7 @@ router.get("/recommendations", optionalAuthenticate, VenueController.getRecommen
  * Only VENUE_OWNER can create a venue
  */
 router.post("/", authenticate, authorize(["VENUE_OWNER"]), VenueController.create);
-router.get("/my-venues", authenticate, authorize(["VENUE_OWNER"]), VenueController.fetchMyVenues);
+router.get("/my-venues", authenticate, authorize(["VENUE_OWNER", "EMPLOYEE"]), VenueController.fetchMyVenues);
 
 router.get("/amenities", VenueController.fetchAmenities);
 router.get("/policies", VenueController.fetchPolicies);
@@ -62,5 +62,10 @@ router.delete("/:id/reviews/:reviewId/reply", authenticate, authorize(["VENUE_OW
 router.get("/:id/pricing-rules", VenueController.getPricingRules);
 router.post("/:id/pricing-rules", authenticate, authorize(["VENUE_OWNER"]), VenueController.addPricingRule);
 router.delete("/:id/pricing-rules/:ruleId", authenticate, authorize(["VENUE_OWNER"]), VenueController.deletePricingRule);
+
+// Staff Management
+router.get("/:id/staff", authenticate, authorize(["VENUE_OWNER"]), VenueController.fetchStaff);
+router.post("/:id/staff", authenticate, authorize(["VENUE_OWNER"]), VenueController.addStaff);
+router.delete("/:id/staff/:userId", authenticate, authorize(["VENUE_OWNER"]), VenueController.removeStaff);
 
 export default router;
