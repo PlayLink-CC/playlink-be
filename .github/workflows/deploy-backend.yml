@@ -21,4 +21,4 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             npm install --production
-            pm2 restart playlink-backend
+            pm2 restart playlink-be
