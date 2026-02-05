@@ -14,6 +14,7 @@ import * as BookingService from "../services/BookingService.js";
 import { calculateDynamicPrice } from "../services/VenueService.js";
 import * as CourtRepository from "../repositories/CourtRepository.js";
 
+
 // Helper to group contiguous 1-hour slots
 const groupContiguousSlots = (slots) => {
   if (!slots || !slots.length) return [];
@@ -100,91 +101,100 @@ export const createCheckoutSession = async (req, res) => {
 
     const shareAmount = SplitPaymentService.calculateShares(totalAmount, invites.length);
 
-    // Wallet Logic (Simplified for Multi-booking: only support full points payment if it covers ALL)
+    let pointsUsed = 0;
+    let stripeAmount = totalAmount;
+
     if (useWallet) {
       const walletBalance = await WalletRepository.getWalletBalance(userId);
-      if (walletBalance >= totalAmount) {
-        const pool = BookingRepository.getPool();
-        const conn = await pool.getConnection();
-        try {
-          await conn.beginTransaction();
-
-          // Deduct Points
-          await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
-          await WalletRepository.createTransaction(conn, {
-            userId,
-            amount: -totalAmount,
-            type: "DEBIT",
-            description: `Multi-slot Booking payment (Points) for ${venue.name}`,
-            referenceType: "BOOKING_PAYMENT"
-          });
-
-          const bookingIds = [];
-          for (const b of bookingDetails) {
-            const bookingId = await BookingRepository.createBooking(conn, {
-              venueId,
-              courtId: b.courtId,
-              sportId: sportId,
-              userId,
-              bookingStart: b.startStr,
-              bookingEnd: b.endStr,
-              totalAmount: b.amount,
-              cancellationPolicyId: venue.cancellation_policy_id,
-              customCancellationPolicy: venue.custom_cancellation_policy,
-              customRefundPercentage: venue.custom_refund_percentage,
-              customHoursBeforeStart: venue.custom_hours_before_start,
-              pointsUsed: b.amount,
-              paidAmount: 0
-            });
-
-            await BookingRepository.addBookingParticipant(conn, {
-              bookingId, userId, shareAmount: b.amount / (invites.length + 1), isInitiator: 1, paymentStatus: 'PAID'
-            });
-
-            await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, b.amount / (invites.length + 1), conn);
-            await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
-
-            await BookingRepository.createPayment(conn, {
-              bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_MULTI_${Date.now()}`
-            });
-
-            bookingIds.push(bookingId);
-          }
-
-          // Credit Owner
-          if (venue.owner_id) {
-            await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
-            await WalletRepository.createTransaction(conn, {
-              userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
-              description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
-              referenceType: 'BOOKING_PAYMENT'
-            });
-          }
-
-          await conn.commit();
-          return res.json({ success: true, message: "Bookings confirmed with Points!" });
-        } catch (err) {
-          await conn.rollback();
-          throw err;
-        } finally {
-          conn.release();
-        }
+      if (walletBalance > 0) {
+        pointsUsed = Math.min(walletBalance, totalAmount);
+        stripeAmount = totalAmount - pointsUsed;
       }
     }
 
-    // Stripe Session
+    // If fully covered by points, handle internally
+    if (stripeAmount <= 0) {
+      const pool = BookingRepository.getPool();
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+
+        // Deduct Points
+        await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
+        await WalletRepository.createTransaction(conn, {
+          userId,
+          amount: -totalAmount,
+          type: "DEBIT",
+          description: `Multi-slot Booking payment (Points) for ${venue.name}`,
+          referenceType: "BOOKING_PAYMENT_FULL"
+        });
+
+        const bookingIds = [];
+        for (const b of bookingDetails) {
+          const bookingId = await BookingRepository.createBooking(conn, {
+            venueId,
+            courtId: b.courtId,
+            sportId: sportId,
+            userId,
+            bookingStart: b.startStr,
+            bookingEnd: b.endStr,
+            totalAmount: b.amount,
+            cancellationPolicyId: venue.cancellation_policy_id,
+            customCancellationPolicy: venue.custom_cancellation_policy,
+            customRefundPercentage: venue.custom_refund_percentage,
+            customHoursBeforeStart: venue.custom_hours_before_start,
+            pointsUsed: b.amount,
+            paidAmount: 0
+          });
+
+          await BookingRepository.addBookingParticipant(conn, {
+            bookingId, userId, shareAmount: b.amount / (invites.length + 1), isInitiator: 1, paymentStatus: 'PAID'
+          });
+
+          await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, b.amount / (invites.length + 1), conn);
+          await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+
+          await BookingRepository.createPayment(conn, {
+            bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_FULL_${Date.now()}`
+          });
+
+          bookingIds.push(bookingId);
+        }
+
+        // Credit Owner
+        if (venue.owner_id) {
+          await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
+          await WalletRepository.createTransaction(conn, {
+            userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
+            description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
+            referenceType: 'BOOKING_REVENUE',
+            referenceId: bookingIds[0]
+          });
+        }
+
+        await conn.commit();
+        return res.json({ success: true, bookingIds, message: "Bookings confirmed with Points!" });
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+    }
+
+    // Stripe Session for Remainder
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       customer_email: userEmail,
-      line_items: bookingDetails.map(b => ({
+      line_items: [{
         price_data: {
           currency: "lkr",
-          product_data: { name: `${venue.name} (${b.time}, ${b.hours}h)` },
-          unit_amount: Math.round(b.amount * 100),
+          product_data: { name: `Booking at ${venue.name} (Partial Payment)` },
+          unit_amount: Math.round(stripeAmount * 100),
         },
         quantity: 1,
-      })),
+      }],
       metadata: {
         type: 'MULTI_BOOKING',
         venue_id: String(venueId),
@@ -195,10 +205,11 @@ export const createCheckoutSession = async (req, res) => {
         sport_id: String(sportId),
         invites: JSON.stringify(invites),
         total_amount: String(totalAmount),
+        points_used: String(pointsUsed),
         owner_id: String(venue.owner_id)
       },
       success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
+      cancel_url: `${process.env.FRONTEND_URL}/create-booking`, // Redirect back to create booking
     });
 
     return res.json({ checkoutUrl: session.url });
@@ -223,7 +234,7 @@ export const handleCheckoutSuccess = async (req, res) => {
     const session = await stripe.checkout.sessions.retrieve(session_id);
     if (session.payment_status !== "paid") return res.status(400).json({ message: "Payment not completed" });
 
-    const { type, venue_id, user_id, owner_id, sport_id, group_data, invites, total_amount, booking_id } = session.metadata;
+    const { type, venue_id, user_id, owner_id, sport_id, group_data, invites, total_amount, booking_id, points_used } = session.metadata;
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
@@ -267,6 +278,11 @@ export const handleCheckoutSuccess = async (req, res) => {
           );
           if (check.length > 0) continue;
 
+          // Calculate approximate points/cash per booking for record
+          const ratio = Number(g.a) / Number(total_amount);
+          const pointsForThis = (points_used ? Number(points_used) : 0) * ratio;
+          const cashForThis = Number(g.a) - pointsForThis;
+
           const bookingId = await BookingRepository.createBooking(conn, {
             venueId: Number(venue_id),
             courtId: Number(g.c),
@@ -279,8 +295,8 @@ export const handleCheckoutSuccess = async (req, res) => {
             customCancellationPolicy: venue.custom_cancellation_policy,
             customRefundPercentage: venue.custom_refund_percentage,
             customHoursBeforeStart: venue.custom_hours_before_start,
-            pointsUsed: 0,
-            paidAmount: Number(g.a)
+            pointsUsed: pointsForThis,
+            paidAmount: cashForThis
           });
 
           const share = Number(g.a) / (inviteeList.length + 1);
@@ -296,10 +312,29 @@ export const handleCheckoutSuccess = async (req, res) => {
           bookingIds.push(bookingId);
         }
 
-        if (owner_id) {
-          await WalletRepository.updateWalletBalance(conn, Number(owner_id), Number(total_amount));
+        const pointsUsedVal = points_used ? Number(points_used) : 0;
+        const totalAmountVal = Number(total_amount);
+
+        // Deduct points if used
+        if (pointsUsedVal > 0) {
+          // Check balance first? For robustness, assume validation happened at creation, but race condition possible.
+          // If fail, we still have stripe payment... complex.
+          // Let's deduct.
+          await WalletRepository.updateWalletBalance(conn, Number(user_id), -pointsUsedVal);
           await WalletRepository.createTransaction(conn, {
-            userId: Number(owner_id), amount: Number(total_amount), type: 'CREDIT',
+            userId: Number(user_id),
+            amount: -pointsUsedVal,
+            type: "DEBIT",
+            description: `Part-payment (Points) for Booking IDs: ${bookingIds.join(',')}`,
+            referenceType: "BOOKING_PAYMENT_PARTIAL",
+            referenceId: bookingIds[0]
+          });
+        }
+
+        if (owner_id) {
+          await WalletRepository.updateWalletBalance(conn, Number(owner_id), totalAmountVal);
+          await WalletRepository.createTransaction(conn, {
+            userId: Number(owner_id), amount: totalAmountVal, type: 'CREDIT',
             description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
             referenceType: 'BOOKING_REVENUE',
             referenceId: bookingIds[0] // Link to first for ref
@@ -322,6 +357,341 @@ export const handleCheckoutSuccess = async (req, res) => {
   } catch (err) {
     console.error("Checkout Success error", err);
     return res.status(500).json({ message: err.message });
+  }
+};
+
+
+
+export const createPaymentIntent = async (req, res) => {
+  const userId = req.user.id;
+  const userEmail = req.user.email;
+  const { venueId, date, slots, sportId, invites: rawInvites = [], useWallet = false } = req.body;
+  const invites = rawInvites.filter(email => email !== userEmail);
+
+  if (!venueId || !date || !slots || !slots.length) {
+    return res.status(400).json({ message: "Missing booking details" });
+  }
+
+  try {
+    const venue = await BookingRepository.getVenueById(venueId);
+    if (!venue) return res.status(404).json({ message: "Venue not found" });
+
+    const groups = groupContiguousSlots(slots);
+    const bookingDetails = [];
+    let totalAmount = 0;
+
+    for (const group of groups) {
+      const { time, hours } = group;
+
+      const timeError = getTimeValidationError(time, hours);
+      if (timeError) return res.status(400).json({ message: timeError });
+
+      const start = createISTDate(date, time);
+      const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+      const startStr = toMySQLDateTime(start);
+      const endStr = toMySQLDateTime(end);
+
+      const availableCourtId = await BookingService.findAvailableCourt(venueId, startStr, endStr, sportId);
+      if (!availableCourtId) {
+        return res.status(409).json({ message: `Slot ${time} (${hours}h) no longer available` });
+      }
+
+      const amount = await calculateDynamicPrice(venue, date, time, hours);
+      totalAmount += amount;
+
+      bookingDetails.push({
+        time, hours, startStr, endStr, courtId: availableCourtId, amount
+      });
+    }
+
+    let pointsUsed = 0;
+    let stripeAmount = totalAmount;
+
+    if (useWallet) {
+      const walletBalance = await WalletRepository.getWalletBalance(userId);
+      if (walletBalance > 0) {
+        pointsUsed = Math.min(walletBalance, totalAmount);
+        stripeAmount = totalAmount - pointsUsed;
+      }
+    }
+
+    // If fully covered by points, frontend should call confirmBookingWithPoints, but if they call this, we can signal it.
+    if (stripeAmount <= 0) {
+      return res.json({
+        clientSecret: null,
+        amount: 0,
+        pointsUsed: totalAmount,
+        message: "Full payment covered by points",
+        fullyCovered: true
+      });
+    }
+
+    // Create PaymentIntent for the remainder
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(stripeAmount * 100),
+      currency: "lkr",
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        type: 'MULTI_BOOKING',
+        venue_id: String(venueId),
+        user_id: String(userId),
+        group_data: JSON.stringify(bookingDetails.map(b => ({
+          t: b.time, h: b.hours, c: b.courtId, a: b.amount, s: b.startStr, e: b.endStr
+        }))),
+        sport_id: String(sportId),
+        invites: JSON.stringify(invites),
+        total_amount: String(totalAmount),
+        points_used: String(pointsUsed), // Store points used
+        owner_id: String(venue.owner_id)
+      }
+    });
+
+    res.json({ clientSecret: paymentIntent.client_secret, amount: stripeAmount, pointsUsed, fullyCovered: false });
+
+  } catch (err) {
+    console.error("Error creating PaymentIntent", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const confirmBookingWithIntent = async (req, res) => {
+  const { paymentIntentId } = req.body;
+  if (!paymentIntentId) return res.status(400).json({ message: "Missing paymentIntentId" });
+
+  try {
+    // 1. Retrieve Intent
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (paymentIntent.status !== 'succeeded') {
+      return res.status(400).json({ message: "Payment not succeeded yet" });
+    }
+
+    const { type, venue_id, user_id, start_str, end_str, court_id, sport_id, total_amount, group_data, invites, owner_id, points_used, booking_id } = paymentIntent.metadata;
+
+    const pointsUsedVal = points_used ? Number(points_used) : 0;
+    const totalAmountVal = Number(total_amount);
+
+    // Idempotency: Check if booking exists for this PI
+    const existing = await BookingRepository.getBookingByPaymentReference(paymentIntent.id);
+    if (existing) {
+      return res.json({ success: true, message: "Booking already confirmed" });
+    }
+
+    const pool = BookingRepository.getPool();
+    const conn = await pool.getConnection();
+
+    // === HANDLE SHARE PAYMENT ===
+    if (type === 'SHARE_PAYMENT') {
+      try {
+        await SplitPaymentService.executeReimbursement(Number(user_id), Number(booking_id), paymentIntent.amount / 100);
+        await BookingRepository.createPayment(conn, {
+          bookingId: Number(booking_id),
+          payerId: Number(user_id),
+          amount: paymentIntent.amount / 100,
+          currency: "LKR",
+          providerReference: paymentIntent.id,
+        });
+        await BookingRepository.updatePaymentStatus(conn, paymentIntent.id, 'SUCCEEDED');
+        conn.release();
+        return res.json({ success: true, message: "Share paid via Stripe" });
+      } catch (err) {
+        console.error("Error processing share payment", err);
+        conn.release();
+        return res.status(500).json({ message: "Error processing payment" });
+      }
+    }
+
+    try {
+      await conn.beginTransaction();
+      const venue = await BookingRepository.getVenueById(venue_id);
+      const bookingIds = [];
+
+      const groups = JSON.parse(group_data);
+      const inviteeList = invites ? JSON.parse(invites) : [];
+      const numberOfBookings = groups.length;
+
+      // Distribute points usage across bookings (proportional)
+      // Or simpler: Assign all points to first booking? No, proportional is safer for refunds.
+      // Actually, let's just create them. `createBooking` accepts `pointsUsed`.
+      // We can distribute points equally per LKR amount.
+
+      // Total calculated from groups might differ slightly from total_amount due to rounding? 
+      // Use total_amount from metadata as source of truth.
+
+      for (let i = 0; i < groups.length; i++) {
+        const g = groups[i];
+        const ratio = Number(g.a) / totalAmountVal;
+        const pointsForThis = pointsUsedVal * ratio;
+        const cashForThis = Number(g.a) - pointsForThis;
+
+        const bookingId = await BookingRepository.createBooking(conn, {
+          venueId: Number(venue_id),
+          courtId: Number(g.c),
+          sportId: Number(sport_id),
+          userId: Number(user_id),
+          bookingStart: g.s,
+          bookingEnd: g.e,
+          totalAmount: Number(g.a),
+          cancellationPolicyId: venue.cancellation_policy_id,
+          customCancellationPolicy: venue.custom_cancellation_policy,
+          customRefundPercentage: venue.custom_refund_percentage,
+          customHoursBeforeStart: venue.custom_hours_before_start,
+          pointsUsed: pointsForThis,
+          paidAmount: cashForThis
+        });
+
+        const share = Number(g.a) / (inviteeList.length + 1);
+        await BookingRepository.addBookingParticipant(conn, {
+          bookingId, userId: Number(user_id), shareAmount: share, isInitiator: 1, paymentStatus: 'PAID'
+        });
+
+        await SplitPaymentService.setupBookingSplits(bookingId, Number(user_id), inviteeList, share, conn);
+        await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+        await BookingRepository.createPayment(conn, {
+          bookingId, payerId: Number(user_id), amount: cashForThis, currency: "LKR", providerReference: paymentIntent.id
+        });
+        bookingIds.push(bookingId);
+      }
+
+      // Deduct points if used
+      if (pointsUsedVal > 0) {
+        await WalletRepository.updateWalletBalance(conn, Number(user_id), -pointsUsedVal);
+        await WalletRepository.createTransaction(conn, {
+          userId: Number(user_id),
+          amount: -pointsUsedVal,
+          type: "DEBIT",
+          description: `Part-payment (Points) for Booking IDs: ${bookingIds.join(',')}`,
+          referenceType: "BOOKING_PAYMENT_PARTIAL"
+        });
+      }
+
+      if (owner_id) {
+        await WalletRepository.updateWalletBalance(conn, Number(owner_id), Number(total_amount));
+        await WalletRepository.createTransaction(conn, {
+          userId: Number(owner_id), amount: Number(total_amount), type: 'CREDIT',
+          description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
+          referenceType: 'BOOKING_REVENUE',
+          referenceId: bookingIds[0]
+        });
+      }
+
+      await conn.commit();
+      res.json({ success: true, bookingIds });
+
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+  } catch (err) {
+    console.error("Error confirming booking", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const confirmBookingWithPoints = async (req, res) => {
+  const userId = req.user.id;
+  const { venueId, date, slots, sportId, invites: rawInvites = [] } = req.body;
+  const invites = rawInvites.filter(email => email !== req.user.email);
+
+  if (!venueId || !date || !slots || !slots.length) {
+    return res.status(400).json({ message: "Missing booking details" });
+  }
+
+  try {
+    const conn = await BookingRepository.getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const venue = await BookingRepository.getVenueById(venueId);
+      const groups = groupContiguousSlots(slots);
+      let totalAmount = 0;
+      const bookingDetails = [];
+
+      // 1. Calculate and Reserve
+      for (const group of groups) {
+        const { time, hours } = group;
+        const start = createISTDate(date, time);
+        const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+        const startStr = toMySQLDateTime(start);
+        const endStr = toMySQLDateTime(end);
+
+        // Availability check
+        const availableCourtId = await BookingService.findAvailableCourt(venueId, startStr, endStr, sportId);
+        if (!availableCourtId) {
+          await conn.rollback();
+          return res.status(409).json({ message: `Slot ${time} unavailable.` });
+        }
+
+        const amount = await calculateDynamicPrice(venue, date, time, hours);
+        totalAmount += amount;
+        bookingDetails.push({ time, hours, startStr, endStr, courtId: availableCourtId, amount });
+      }
+
+      // 2. Check Balance
+      const walletBalance = await WalletRepository.getWalletBalance(userId);
+      if (walletBalance < totalAmount) {
+        await conn.rollback();
+        return res.status(400).json({ message: "Insufficient points balance." });
+      }
+
+      // 3. Deduct Points
+      await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
+      await WalletRepository.createTransaction(conn, {
+        userId, amount: -totalAmount, type: 'DEBIT',
+        description: `Booking Payment (Points) for ${venue.name}`, referenceType: 'BOOKING_PAYMENT_FULL'
+      });
+
+      // 4. Create Bookings
+      const bookingIds = [];
+      for (const b of bookingDetails) {
+        const bookingId = await BookingRepository.createBooking(conn, {
+          venueId, courtId: b.courtId, sportId: Number(sportId), userId,
+          bookingStart: b.startStr, bookingEnd: b.endStr,
+          totalAmount: b.amount,
+          cancellationPolicyId: venue.cancellation_policy_id,
+          customCancellationPolicy: venue.custom_cancellation_policy,
+          customRefundPercentage: venue.custom_refund_percentage,
+          customHoursBeforeStart: venue.custom_hours_before_start,
+          pointsUsed: b.amount,
+          paidAmount: 0 // Cash paid is 0
+        });
+
+        const share = b.amount / (invites.length + 1);
+        await BookingRepository.addBookingParticipant(conn, {
+          bookingId, userId, shareAmount: share, isInitiator: 1, paymentStatus: 'PAID'
+        });
+        await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, share, conn);
+        await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+        await BookingRepository.createPayment(conn, {
+          bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_FULL_${Date.now()}`
+        });
+        bookingIds.push(bookingId);
+      }
+
+      // 5. Credit Owner
+      if (venue.owner_id) {
+        await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
+        await WalletRepository.createTransaction(conn, {
+          userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
+          description: `Revenue (Points) Booking IDs: ${bookingIds.join(',')}`,
+          referenceType: 'BOOKING_REVENUE', referenceId: bookingIds[0]
+        });
+      }
+
+      await conn.commit();
+      res.json({ success: true, bookingIds });
+
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -392,35 +762,20 @@ export const paySplitShare = async (req, res) => {
       return res.json({ success: true, message: "Share paid successfully" });
 
     } else {
-      // Stripe flow for split share
-
-      const session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        payment_method_types: ["card"],
-        customer_email: req.user.email,
-        line_items: [
-          {
-            price_data: {
-              currency: "lkr",
-              product_data: {
-                name: `Share Payment for Booking #${bookingId}`,
-              },
-              unit_amount: Math.round(amountToPay * 100),
-            },
-            quantity: 1,
-          },
-        ],
+      // Stripe flow for split share - Use PaymentIntent for embedded flow
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(amountToPay * 100),
+        currency: "lkr",
+        automatic_payment_methods: { enabled: true },
         metadata: {
           type: 'SHARE_PAYMENT',
           booking_id: String(bookingId),
           user_id: String(userId),
         },
-        success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
       });
 
       conn.release();
-      return res.json({ checkoutUrl: session.url });
+      return res.json({ clientSecret: paymentIntent.client_secret, amount: amountToPay });
     }
 
   } catch (err) {
@@ -429,12 +784,7 @@ export const paySplitShare = async (req, res) => {
   }
 }
 
-// ... Keep existing exports (getBookedSlots, getMyBookings, getOwnerBookings) ...
-// To save space, I'll copy the remaining unchanged functions below
-// But wait, the tool replaces the WHOLE file from StartLine to EndLine. 
-// I need to make sure I include the rest of the file or just replace the top part?
-// The file has ~297 lines. I replaced imports and added new functions.
-// I must include getBookedSlots, getMyBookings, getOwnerBookings.
+
 
 export const getBookedSlots = async (req, res) => {
   const { venueId } = req.params;

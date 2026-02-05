@@ -13,6 +13,9 @@ import {
   calculatePrice,
   getVenueCalendarBookings,
   createWalkInBooking,
+  createPaymentIntent,
+  confirmBookingWithIntent,
+  confirmBookingWithPoints
 } from "../controllers/BookingController.js";
 
 const router = express.Router();
@@ -21,6 +24,9 @@ const router = express.Router();
 router.post("/checkout-session", authMiddleware, authorize(['PLAYER']), createCheckoutSession);
 router.get("/checkout-success", authMiddleware, authorize(['PLAYER']), handleCheckoutSuccess);
 router.post("/pay-split-share", authMiddleware, authorize(['PLAYER']), paySplitShare);
+router.post("/create-payment-intent", authMiddleware, authorize(['PLAYER']), createPaymentIntent);
+router.post("/confirm-payment", authMiddleware, authorize(['PLAYER']), confirmBookingWithIntent);
+router.post("/confirm-points-booking", authMiddleware, authorize(['PLAYER']), confirmBookingWithPoints);
 
 // Booking Management - Players
 router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER', 'VENUE_OWNER']), cancelBooking);
@@ -34,8 +40,6 @@ router.get("/owner", authMiddleware, authorize(['VENUE_OWNER']), getOwnerBooking
 // Get booked slots for a venue on a specific date
 router.get("/booked-slots/:venueId", getBookedSlots);
 
-// Get available slots
-// Get available slots
 // Get available slots
 router.get("/available-slots/:venueId", getAvailableTimeSlots);
 
