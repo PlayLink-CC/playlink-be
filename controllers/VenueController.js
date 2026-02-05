@@ -22,6 +22,7 @@ import {
   updateVenue as updateVenueService,
   blockVenueSlot,
   getVenuesByOwner,
+  getVenuesByEmployee, // New import
   getVenueById,
   deleteVenue,
   getVenueReviews,
@@ -367,9 +368,14 @@ export const blockSlot = async (req, res) => {
  * GET /api/venues/my-venues
  */
 export const fetchMyVenues = async (req, res) => {
-  const ownerId = req.user.id;
+  const userId = req.user.id;
   try {
-    const venues = await getVenuesByOwner(ownerId);
+    let venues;
+    if (req.user.accountType === 'EMPLOYEE') {
+      venues = await getVenuesByEmployee(userId);
+    } else {
+      venues = await getVenuesByOwner(userId);
+    }
     res.json(venues);
   } catch (err) {
     console.error("Error fetching my venues:", err);

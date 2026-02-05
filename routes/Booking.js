@@ -29,7 +29,7 @@ router.post("/confirm-payment", authMiddleware, authorize(['PLAYER']), confirmBo
 router.post("/confirm-points-booking", authMiddleware, authorize(['PLAYER']), confirmBookingWithPoints);
 
 // Booking Management - Players
-router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER', 'VENUE_OWNER']), cancelBooking);
+router.patch("/:id/cancel", authMiddleware, authorize(['PLAYER', 'VENUE_OWNER', 'EMPLOYEE']), cancelBooking);
 router.patch("/:id/reschedule", authMiddleware, authorize(['PLAYER']), rescheduleBooking);
 
 router.get("/my", authMiddleware, authorize(['PLAYER']), getMyBookings);
@@ -44,8 +44,8 @@ router.get("/booked-slots/:venueId", getBookedSlots);
 router.get("/available-slots/:venueId", getAvailableTimeSlots);
 
 // Venue Calendar
-router.get("/venue/:venueId/calendar", authMiddleware, authorize(['VENUE_OWNER']), getVenueCalendarBookings);
-router.post("/venue/:venueId/walk-in", authMiddleware, authorize(['VENUE_OWNER']), createWalkInBooking);
+router.get("/venue/:venueId/calendar", authMiddleware, authorize(['VENUE_OWNER', 'EMPLOYEE']), getVenueCalendarBookings);
+router.post("/venue/:venueId/walk-in", authMiddleware, authorize(['VENUE_OWNER', 'EMPLOYEE']), createWalkInBooking);
 
 // Calculate Price
 router.post("/calculate-price", authMiddleware, authorize(['PLAYER']), calculatePrice);

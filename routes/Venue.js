@@ -42,7 +42,7 @@ router.get("/recommendations", optionalAuthenticate, VenueController.getRecommen
  * Only VENUE_OWNER can create a venue
  */
 router.post("/", authenticate, authorize(["VENUE_OWNER"]), VenueController.create);
-router.get("/my-venues", authenticate, authorize(["VENUE_OWNER"]), VenueController.fetchMyVenues);
+router.get("/my-venues", authenticate, authorize(["VENUE_OWNER", "EMPLOYEE"]), VenueController.fetchMyVenues);
 
 router.get("/amenities", VenueController.fetchAmenities);
 router.get("/policies", VenueController.fetchPolicies);

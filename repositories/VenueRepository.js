@@ -633,6 +633,46 @@ export const findVenuesByOwner = async (ownerId) => {
 };
 
 /**
+ * Find venues assigned to an employee
+ * 
+ * @async
+ * @param {number} employeeId
+ * @returns {Promise<Object[]>} Array of venues
+ */
+export const findVenuesByEmployee = async (employeeId) => {
+    const sql = `
+        SELECT 
+            v.venue_id,
+            v.name AS venue_name,
+            v.address,
+            v.city,
+            v.price_per_hour,
+            v.is_active,
+            vi.image_url AS primary_image,
+            COALESCE(AVG(r.rating), 0) AS avg_rating,
+            COUNT(DISTINCT r.review_id) AS review_count
+        FROM venues v
+        JOIN employee_venue ev ON ev.venue_id = v.venue_id
+        LEFT JOIN venue_images vi 
+            ON vi.venue_id = v.venue_id
+            AND vi.is_primary = 1
+        LEFT JOIN reviews r
+            ON r.venue_id = v.venue_id
+        WHERE ev.user_id = ?
+        GROUP BY v.venue_id, v.name, v.address, v.city, v.price_per_hour, v.is_active, vi.image_url
+        ORDER BY v.created_at DESC
+    `;
+    const [rows] = await connectDB.execute(sql, [employeeId]);
+
+    // Fix: Force BigInts/Decimals to Numbers to prevent serialization crashes
+    return rows.map(venue => ({
+        ...venue,
+        avg_rating: Number(venue.avg_rating || 0),
+        review_count: Number(venue.review_count || 0)
+    }));
+};
+
+/**
  * Find a specific venue by ID
  * 
  * @async

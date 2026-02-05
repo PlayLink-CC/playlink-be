@@ -264,6 +264,10 @@ export const getVenuesByOwner = async (ownerId) => {
   return await venueRepository.findVenuesByOwner(ownerId);
 };
 
+export const getVenuesByEmployee = async (employeeId) => {
+  return await venueRepository.findVenuesByEmployee(employeeId);
+};
+
 /**
  * Get venue details by ID
  */
