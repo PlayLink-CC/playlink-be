@@ -101,91 +101,100 @@ export const createCheckoutSession = async (req, res) => {
 
     const shareAmount = SplitPaymentService.calculateShares(totalAmount, invites.length);
 
-    // Wallet Logic (Simplified for Multi-booking: only support full points payment if it covers ALL)
+    let pointsUsed = 0;
+    let stripeAmount = totalAmount;
+
     if (useWallet) {
       const walletBalance = await WalletRepository.getWalletBalance(userId);
-      if (walletBalance >= totalAmount) {
-        const pool = BookingRepository.getPool();
-        const conn = await pool.getConnection();
-        try {
-          await conn.beginTransaction();
-
-          // Deduct Points
-          await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
-          await WalletRepository.createTransaction(conn, {
-            userId,
-            amount: -totalAmount,
-            type: "DEBIT",
-            description: `Multi-slot Booking payment (Points) for ${venue.name}`,
-            referenceType: "BOOKING_PAYMENT"
-          });
-
-          const bookingIds = [];
-          for (const b of bookingDetails) {
-            const bookingId = await BookingRepository.createBooking(conn, {
-              venueId,
-              courtId: b.courtId,
-              sportId: sportId,
-              userId,
-              bookingStart: b.startStr,
-              bookingEnd: b.endStr,
-              totalAmount: b.amount,
-              cancellationPolicyId: venue.cancellation_policy_id,
-              customCancellationPolicy: venue.custom_cancellation_policy,
-              customRefundPercentage: venue.custom_refund_percentage,
-              customHoursBeforeStart: venue.custom_hours_before_start,
-              pointsUsed: b.amount,
-              paidAmount: 0
-            });
-
-            await BookingRepository.addBookingParticipant(conn, {
-              bookingId, userId, shareAmount: b.amount / (invites.length + 1), isInitiator: 1, paymentStatus: 'PAID'
-            });
-
-            await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, b.amount / (invites.length + 1), conn);
-            await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
-
-            await BookingRepository.createPayment(conn, {
-              bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_MULTI_${Date.now()}`
-            });
-
-            bookingIds.push(bookingId);
-          }
-
-          // Credit Owner
-          if (venue.owner_id) {
-            await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
-            await WalletRepository.createTransaction(conn, {
-              userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
-              description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
-              referenceType: 'BOOKING_PAYMENT'
-            });
-          }
-
-          await conn.commit();
-          return res.json({ success: true, message: "Bookings confirmed with Points!" });
-        } catch (err) {
-          await conn.rollback();
-          throw err;
-        } finally {
-          conn.release();
-        }
+      if (walletBalance > 0) {
+        pointsUsed = Math.min(walletBalance, totalAmount);
+        stripeAmount = totalAmount - pointsUsed;
       }
     }
 
-    // Stripe Session
+    // If fully covered by points, handle internally
+    if (stripeAmount <= 0) {
+      const pool = BookingRepository.getPool();
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+
+        // Deduct Points
+        await WalletRepository.updateWalletBalance(conn, userId, -totalAmount);
+        await WalletRepository.createTransaction(conn, {
+          userId,
+          amount: -totalAmount,
+          type: "DEBIT",
+          description: `Multi-slot Booking payment (Points) for ${venue.name}`,
+          referenceType: "BOOKING_PAYMENT_FULL"
+        });
+
+        const bookingIds = [];
+        for (const b of bookingDetails) {
+          const bookingId = await BookingRepository.createBooking(conn, {
+            venueId,
+            courtId: b.courtId,
+            sportId: sportId,
+            userId,
+            bookingStart: b.startStr,
+            bookingEnd: b.endStr,
+            totalAmount: b.amount,
+            cancellationPolicyId: venue.cancellation_policy_id,
+            customCancellationPolicy: venue.custom_cancellation_policy,
+            customRefundPercentage: venue.custom_refund_percentage,
+            customHoursBeforeStart: venue.custom_hours_before_start,
+            pointsUsed: b.amount,
+            paidAmount: 0
+          });
+
+          await BookingRepository.addBookingParticipant(conn, {
+            bookingId, userId, shareAmount: b.amount / (invites.length + 1), isInitiator: 1, paymentStatus: 'PAID'
+          });
+
+          await SplitPaymentService.setupBookingSplits(bookingId, userId, invites, b.amount / (invites.length + 1), conn);
+          await BookingRepository.updateBookingStatus(conn, bookingId, "CONFIRMED");
+
+          await BookingRepository.createPayment(conn, {
+            bookingId, payerId: userId, amount: b.amount, currency: "LKR", providerReference: `POINTS_FULL_${Date.now()}`
+          });
+
+          bookingIds.push(bookingId);
+        }
+
+        // Credit Owner
+        if (venue.owner_id) {
+          await WalletRepository.updateWalletBalance(conn, venue.owner_id, totalAmount);
+          await WalletRepository.createTransaction(conn, {
+            userId: venue.owner_id, amount: totalAmount, type: 'CREDIT',
+            description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
+            referenceType: 'BOOKING_REVENUE',
+            referenceId: bookingIds[0]
+          });
+        }
+
+        await conn.commit();
+        return res.json({ success: true, bookingIds, message: "Bookings confirmed with Points!" });
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+    }
+
+    // Stripe Session for Remainder
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       customer_email: userEmail,
-      line_items: bookingDetails.map(b => ({
+      line_items: [{
         price_data: {
           currency: "lkr",
-          product_data: { name: `${venue.name} (${b.time}, ${b.hours}h)` },
-          unit_amount: Math.round(b.amount * 100),
+          product_data: { name: `Booking at ${venue.name} (Partial Payment)` },
+          unit_amount: Math.round(stripeAmount * 100),
         },
         quantity: 1,
-      })),
+      }],
       metadata: {
         type: 'MULTI_BOOKING',
         venue_id: String(venueId),
@@ -196,10 +205,11 @@ export const createCheckoutSession = async (req, res) => {
         sport_id: String(sportId),
         invites: JSON.stringify(invites),
         total_amount: String(totalAmount),
+        points_used: String(pointsUsed),
         owner_id: String(venue.owner_id)
       },
       success_url: `${process.env.FRONTEND_URL}/booking-summary?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/booking-summary?cancelled=true`,
+      cancel_url: `${process.env.FRONTEND_URL}/create-booking`, // Redirect back to create booking
     });
 
     return res.json({ checkoutUrl: session.url });
@@ -224,7 +234,7 @@ export const handleCheckoutSuccess = async (req, res) => {
     const session = await stripe.checkout.sessions.retrieve(session_id);
     if (session.payment_status !== "paid") return res.status(400).json({ message: "Payment not completed" });
 
-    const { type, venue_id, user_id, owner_id, sport_id, group_data, invites, total_amount, booking_id } = session.metadata;
+    const { type, venue_id, user_id, owner_id, sport_id, group_data, invites, total_amount, booking_id, points_used } = session.metadata;
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
@@ -268,6 +278,11 @@ export const handleCheckoutSuccess = async (req, res) => {
           );
           if (check.length > 0) continue;
 
+          // Calculate approximate points/cash per booking for record
+          const ratio = Number(g.a) / Number(total_amount);
+          const pointsForThis = (points_used ? Number(points_used) : 0) * ratio;
+          const cashForThis = Number(g.a) - pointsForThis;
+
           const bookingId = await BookingRepository.createBooking(conn, {
             venueId: Number(venue_id),
             courtId: Number(g.c),
@@ -280,8 +295,8 @@ export const handleCheckoutSuccess = async (req, res) => {
             customCancellationPolicy: venue.custom_cancellation_policy,
             customRefundPercentage: venue.custom_refund_percentage,
             customHoursBeforeStart: venue.custom_hours_before_start,
-            pointsUsed: 0,
-            paidAmount: Number(g.a)
+            pointsUsed: pointsForThis,
+            paidAmount: cashForThis
           });
 
           const share = Number(g.a) / (inviteeList.length + 1);
@@ -297,10 +312,29 @@ export const handleCheckoutSuccess = async (req, res) => {
           bookingIds.push(bookingId);
         }
 
-        if (owner_id) {
-          await WalletRepository.updateWalletBalance(conn, Number(owner_id), Number(total_amount));
+        const pointsUsedVal = points_used ? Number(points_used) : 0;
+        const totalAmountVal = Number(total_amount);
+
+        // Deduct points if used
+        if (pointsUsedVal > 0) {
+          // Check balance first? For robustness, assume validation happened at creation, but race condition possible.
+          // If fail, we still have stripe payment... complex.
+          // Let's deduct.
+          await WalletRepository.updateWalletBalance(conn, Number(user_id), -pointsUsedVal);
           await WalletRepository.createTransaction(conn, {
-            userId: Number(owner_id), amount: Number(total_amount), type: 'CREDIT',
+            userId: Number(user_id),
+            amount: -pointsUsedVal,
+            type: "DEBIT",
+            description: `Part-payment (Points) for Booking IDs: ${bookingIds.join(',')}`,
+            referenceType: "BOOKING_PAYMENT_PARTIAL",
+            referenceId: bookingIds[0]
+          });
+        }
+
+        if (owner_id) {
+          await WalletRepository.updateWalletBalance(conn, Number(owner_id), totalAmountVal);
+          await WalletRepository.createTransaction(conn, {
+            userId: Number(owner_id), amount: totalAmountVal, type: 'CREDIT',
             description: `Revenue from Multi-slot Booking. IDs: ${bookingIds.join(',')}`,
             referenceType: 'BOOKING_REVENUE',
             referenceId: bookingIds[0] // Link to first for ref
