@@ -465,7 +465,7 @@ export const confirmBookingWithIntent = async (req, res) => {
       return res.status(400).json({ message: "Payment not succeeded yet" });
     }
 
-    const { type, venue_id, user_id, start_str, end_str, court_id, sport_id, total_amount, group_data, invites, owner_id, points_used } = paymentIntent.metadata;
+    const { type, venue_id, user_id, start_str, end_str, court_id, sport_id, total_amount, group_data, invites, owner_id, points_used, booking_id } = paymentIntent.metadata;
 
     const pointsUsedVal = points_used ? Number(points_used) : 0;
     const totalAmountVal = Number(total_amount);
@@ -478,6 +478,27 @@ export const confirmBookingWithIntent = async (req, res) => {
 
     const pool = BookingRepository.getPool();
     const conn = await pool.getConnection();
+
+    // === HANDLE SHARE PAYMENT ===
+    if (type === 'SHARE_PAYMENT') {
+      try {
+        await SplitPaymentService.executeReimbursement(Number(user_id), Number(booking_id), paymentIntent.amount / 100);
+        await BookingRepository.createPayment(conn, {
+          bookingId: Number(booking_id),
+          payerId: Number(user_id),
+          amount: paymentIntent.amount / 100,
+          currency: "LKR",
+          providerReference: paymentIntent.id,
+        });
+        await BookingRepository.updatePaymentStatus(conn, paymentIntent.id, 'SUCCEEDED');
+        conn.release();
+        return res.json({ success: true, message: "Share paid via Stripe" });
+      } catch (err) {
+        console.error("Error processing share payment", err);
+        conn.release();
+        return res.status(500).json({ message: "Error processing payment" });
+      }
+    }
 
     try {
       await conn.beginTransaction();
@@ -741,8 +762,7 @@ export const paySplitShare = async (req, res) => {
       return res.json({ success: true, message: "Share paid successfully" });
 
     } else {
-      // Stripe flow for split share
-
+      // Stripe flow for split share - Use Checkout Session
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         payment_method_types: ["card"],
