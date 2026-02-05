@@ -63,4 +63,9 @@ router.get("/:id/pricing-rules", VenueController.getPricingRules);
 router.post("/:id/pricing-rules", authenticate, authorize(["VENUE_OWNER"]), VenueController.addPricingRule);
 router.delete("/:id/pricing-rules/:ruleId", authenticate, authorize(["VENUE_OWNER"]), VenueController.deletePricingRule);
 
+// Staff Management
+router.get("/:id/staff", authenticate, authorize(["VENUE_OWNER"]), VenueController.fetchStaff);
+router.post("/:id/staff", authenticate, authorize(["VENUE_OWNER"]), VenueController.addStaff);
+router.delete("/:id/staff/:userId", authenticate, authorize(["VENUE_OWNER"]), VenueController.removeStaff);
+
 export default router;

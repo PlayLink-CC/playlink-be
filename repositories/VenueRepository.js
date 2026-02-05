@@ -798,11 +798,62 @@ export const addPricingRule = async ({ venueId, name, startTime, endTime, multip
 
 /**
  * Get pricing rules for a venue
+ * @param {number} venueId 
+ * @returns {Promise<Object[]>}
  */
 export const getPricingRules = async (venueId) => {
     const [rows] = await connectDB.execute("SELECT * FROM venue_pricing_rules WHERE venue_id = ?", [venueId]);
     return rows;
 };
+
+/**
+ * Add staff member to venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @param {number} userId
+ * @returns {Promise<void>}
+ */
+export const addStaff = async (venueId, userId) => {
+    await connectDB.execute(
+        "INSERT INTO employee_venue (venue_id, user_id) VALUES (?, ?)",
+        [venueId, userId]
+    );
+};
+
+/**
+ * Remove staff member from venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @param {number} userId
+ * @returns {Promise<void>}
+ */
+export const removeStaff = async (venueId, userId) => {
+    await connectDB.execute(
+        "DELETE FROM employee_venue WHERE venue_id = ? AND user_id = ?",
+        [venueId, userId]
+    );
+};
+
+/**
+ * Get all staff for a venue
+ * 
+ * @async
+ * @param {number} venueId
+ * @returns {Promise<Object[]>}
+ */
+export const getStaff = async (venueId) => {
+    const sql = `
+    SELECT u.user_id, u.full_name, u.email, u.phone, u.city 
+    FROM users u
+    JOIN employee_venue ev ON ev.user_id = u.user_id
+    WHERE ev.venue_id = ?
+  `;
+    const [rows] = await connectDB.execute(sql, [venueId]);
+    return rows;
+};
+
 
 /**
  * Delete a pricing rule

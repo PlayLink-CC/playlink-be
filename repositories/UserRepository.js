@@ -168,6 +168,21 @@ export const findOwnersByCity = async (city, excludeUserId = null) => {
 };
 
 /**
+ * Update user account type
+ * 
+ * @async
+ * @param {number} userId
+ * @param {string} accountType
+ * @returns {Promise<void>}
+ */
+export const updateAccountType = async (userId, accountType) => {
+  await connectDB.execute(
+    "UPDATE users SET account_type = ? WHERE user_id = ?",
+    [accountType, userId]
+  );
+};
+
+/**
  * Find venue ID associated with an employee
  * 
  * @async

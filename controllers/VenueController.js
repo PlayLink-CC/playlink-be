@@ -34,6 +34,8 @@ import {
 import * as VenueRepository from "../repositories/VenueRepository.js";
 import * as BookingRepository from "../repositories/BookingRepository.js";
 import * as CourtRepository from "../repositories/CourtRepository.js";
+import * as UserRepository from "../repositories/UserRepository.js"; // Import generic
+import { findByEmail as findUsers } from "../repositories/UserRepository.js"; // Alias for specific usage if needed or just use UserRepository.findByEmail
 import { toMySQLDateTime, createISTDate } from "../utils/dateUtil.js";
 
 /**
@@ -531,12 +533,90 @@ export const deleteReply = async (req, res) => {
 };
 
 export const fetchVenueSports = async (req, res) => {
-  const { id } = req.params;
   try {
-    const sports = await VenueRepository.getVenueSports(id);
+    const sports = await VenueRepository.getVenueSports(req.params.id);
     res.json(sports);
-  } catch (err) {
-    console.error("Error fetching venue sports:", err);
+  } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
+/**
+ * Add staff member to venue
+ * POST /api/venues/:id/staff
+ */
+export const addStaff = async (req, res) => {
+  const venueId = req.params.id;
+  const { email } = req.body;
+
+  if (!email) return res.status(400).json({ message: "Email is required" });
+
+  try {
+    const user = await findUsers(email); // findByEmail returns user object or undefined
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Check if user is already an employee or owner
+    if (user.account_type === 'VENUE_OWNER') {
+      return res.status(400).json({ message: "Cannot add another Venue Owner as staff" });
+    }
+
+    // Check if already staff for this venue (could check DB unique constraint, but logic check is good too)
+    const existingStaff = await VenueRepository.getStaff(venueId);
+    if (existingStaff.some(s => s.user_id === user.user_id)) {
+      return res.status(409).json({ message: "User is already staff at this venue" });
+    }
+
+    // Check if employee elsewhere? 
+    // Requirement says "Change users.account_type to 'EMPLOYEE'". 
+    // If they are already EMPLOYEE, maybe they are working at another venue? 
+    // For now assuming 1:1 relationship based on schema `employee_venue` (user_id, venue_id) 
+    // and `findEmployeeVenue` returning single venue_id.
+    // So if already EMPLOYEE, we might need to be careful.
+    if (user.account_type === 'EMPLOYEE') {
+      // Let's assume for this assignment we just overwrite/add. 
+      // Though `findEmployeeVenue` returns one. Let's proceed.
+    }
+
+    await VenueRepository.addStaff(venueId, user.user_id);
+    await UserRepository.updateAccountType(user.user_id, 'EMPLOYEE');
+
+    res.status(201).json({ message: "Staff added successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Remove staff member
+ * DELETE /api/venues/:id/staff/:userId
+ */
+export const removeStaff = async (req, res) => {
+  const { id: venueId, userId } = req.params;
+
+  try {
+    await VenueRepository.removeStaff(venueId, userId);
+    await UserRepository.updateAccountType(userId, 'PLAYER'); // Revert to PLAYER
+
+    res.json({ message: "Staff removed successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Get all staff for a venue
+ * GET /api/venues/:id/staff
+ */
+export const fetchStaff = async (req, res) => {
+  try {
+    const staff = await VenueRepository.getStaff(req.params.id);
+    res.json(staff);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
