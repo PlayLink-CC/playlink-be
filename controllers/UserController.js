@@ -205,6 +205,36 @@ export const authenticateUser = async (req, res) => {
 
     const payload = verifyToken(token);
 
+    // --- Dynamic Role Sync ---
+    try {
+      // We need to import findEmployeeVenue. Since it is exported from UserRepository, which is imported as `import { searchUsers as findUsers } ...` we might need to add it to imports or use the * import if available. 
+      // Looking at file content, imports are:
+      // import { getUsers, logInUser, registerUser } from "../services/UserService.js";
+      // import { searchUsers as findUsers } from "../repositories/UserRepository.js";
+      // We will assume we add the import in a separate edit or use dynamic import if needed, but standard is top-level. 
+      // Let's check imports in the file first.
+
+      // We'll trust the user will run the multi-edit or we check imports if we can.
+      // But for this block:
+      const { findEmployeeVenue } = await import("../repositories/UserRepository.js"); // Dynamic import to avoid messing up top-level if complicated, or better to just assume it's there? 
+      // Actually, better to modify top imports in separate step if needed, or just use require? ES modules.
+      // Let's stick to the logic here and I will add the import at the top in a separate tool call if replace_file_content cannot do multiple disjoint edits. 
+      // Wait, I can use multi_replace for that. 
+
+      const venueId = await findEmployeeVenue(payload.id);
+
+      if (venueId) {
+        payload.accountType = 'EMPLOYEE';
+        payload.venueId = venueId;
+      } else if (payload.accountType === 'EMPLOYEE') {
+        // Keep role as EMPLOYEE
+        payload.venueId = null;
+      }
+    } catch (dbError) {
+      console.error("Error syncing role in authenticateUser:", dbError);
+    }
+    // -------------------------
+
     res.json({ user: payload });
   } catch (err) {
     console.error(err);

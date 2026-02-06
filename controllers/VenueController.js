@@ -603,7 +603,8 @@ export const removeStaff = async (req, res) => {
 
   try {
     await VenueRepository.removeStaff(venueId, userId);
-    await UserRepository.updateAccountType(userId, 'PLAYER'); // Revert to PLAYER
+    // REMOVED: await UserRepository.updateAccountType(userId, 'PLAYER'); 
+    // We now preserve EMPLOYEE role so they see the unassigned dashboard.
 
     res.json({ message: "Staff removed successfully" });
   } catch (error) {
