@@ -585,6 +585,12 @@ export const addStaff = async (req, res) => {
       return res.status(409).json({ message: "User is already staff at this venue" });
     }
 
+    // Check if the user is already assigned to ANY other venue
+    const assignedVenueId = await UserRepository.findEmployeeVenue(user.user_id);
+    if (assignedVenueId) {
+      return res.status(400).json({ message: "This employee is already working in another venue" });
+    }
+
     await VenueRepository.addStaff(venueId, user.user_id);
     // REMOVED: await UserRepository.updateAccountType(user.user_id, 'EMPLOYEE');
     // User must already be an EMPLOYEE to get here.
