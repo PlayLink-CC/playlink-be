@@ -11,7 +11,12 @@ import { verifyToken } from "../utils/authUtil.js";
 /**
  * Authenticate request using JWT token from signed cookie
  */
-export const authenticate = (req, res, next) => {
+import { findEmployeeVenue } from "../repositories/UserRepository.js";
+
+/**
+ * Authenticate request using JWT token from signed cookie
+ */
+export const authenticate = async (req, res, next) => {
   const token = req.signedCookies.authToken;
 
   if (!token) {
@@ -23,6 +28,25 @@ export const authenticate = (req, res, next) => {
   try {
     const payload = verifyToken(token); // { id, email, accountType, ... }
     req.user = payload; // attach to request
+
+    // --- Dynamic Role Sync ---
+    try {
+      const venueId = await findEmployeeVenue(req.user.id);
+
+      if (venueId) {
+        // Confirmed Employee with Venue
+        req.user.accountType = 'EMPLOYEE';
+        req.user.venueId = venueId;
+      } else if (req.user.accountType === 'EMPLOYEE') {
+        // Confirmed Employee but NO Venue (e.g. removed by owner or new)
+        // Keep role as EMPLOYEE so they see the "Unassigned" dashboard
+        req.user.venueId = null;
+      }
+    } catch (dbError) {
+      console.error("Error syncing role in auth middleware:", dbError);
+    }
+    // -------------------------
+
     next();
   } catch (err) {
     return res.status(403).json({ error: "Token is invalid or expired" });
