@@ -85,6 +85,8 @@ export const register = async (req, res) => {
         finalAccountType = "VENUE_OWNER";
       } else if (accountType === "PLAYER") {
         finalAccountType = "PLAYER";
+      } else if (accountType === "EMPLOYEE") {
+        finalAccountType = "EMPLOYEE";
       } else {
         return res.status(400).json({ message: "Invalid account type" });
       }
