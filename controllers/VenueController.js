@@ -562,30 +562,32 @@ export const addStaff = async (req, res) => {
     const user = await findUsers(email); // findByEmail returns user object or undefined
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Check if user is already an employee or owner
-    if (user.account_type === 'VENUE_OWNER') {
-      return res.status(400).json({ message: "Cannot add another Venue Owner as staff" });
+    // Check user role strictly
+    if (user.account_type === 'PLAYER') {
+      return res.status(403).json({
+        message: "Only registered Employee accounts can be assigned to a venue. This user is registered as a Player."
+      });
     }
 
-    // Check if already staff for this venue (could check DB unique constraint, but logic check is good too)
+    if (user.account_type === 'VENUE_OWNER') {
+      return res.status(400).json({
+        message: "Venue Owners cannot be assigned as employees."
+      });
+    }
+
+    if (user.account_type !== 'EMPLOYEE') {
+      return res.status(400).json({ message: "User must be a registered Employee." });
+    }
+
+    // Check if already staff for this venue
     const existingStaff = await VenueRepository.getStaff(venueId);
     if (existingStaff.some(s => s.user_id === user.user_id)) {
       return res.status(409).json({ message: "User is already staff at this venue" });
     }
 
-    // Check if employee elsewhere? 
-    // Requirement says "Change users.account_type to 'EMPLOYEE'". 
-    // If they are already EMPLOYEE, maybe they are working at another venue? 
-    // For now assuming 1:1 relationship based on schema `employee_venue` (user_id, venue_id) 
-    // and `findEmployeeVenue` returning single venue_id.
-    // So if already EMPLOYEE, we might need to be careful.
-    if (user.account_type === 'EMPLOYEE') {
-      // Let's assume for this assignment we just overwrite/add. 
-      // Though `findEmployeeVenue` returns one. Let's proceed.
-    }
-
     await VenueRepository.addStaff(venueId, user.user_id);
-    await UserRepository.updateAccountType(user.user_id, 'EMPLOYEE');
+    // REMOVED: await UserRepository.updateAccountType(user.user_id, 'EMPLOYEE');
+    // User must already be an EMPLOYEE to get here.
 
     res.status(201).json({ message: "Staff added successfully" });
   } catch (error) {
